@@ -4,8 +4,11 @@ import os.log
 
 private let logger = Logger(subsystem: "com.voicescribe", category: "HotKey")
 
+
+@MainActor
 public class HotKeyManager {
     public static let shared = HotKeyManager()
+
     
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?

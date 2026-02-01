@@ -17,6 +17,8 @@ struct VoiceScribeApp: App {
     }
 }
 
+
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     var floatWindow: NSWindow?
     
@@ -158,7 +160,7 @@ struct GlassView: View {
         .onAppear {
             Task { await appState.initialize() }
         }
-        .onChange(of: appState.transcript) { newText in
+        .onChange(of: appState.transcript) { oldValue, newText in
             if !newText.isEmpty && !appState.isRecording {
                 // Hide window after short delay to show "Copied" status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
