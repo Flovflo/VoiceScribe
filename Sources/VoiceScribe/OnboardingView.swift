@@ -188,7 +188,7 @@ struct OnboardingView: View {
                 }
                 .font(.system(size: 11))
                 
-                if appState.pythonService.isModelCached && !appState.isModelDownloading {
+                if appState.nativeEngine.isModelCached && !appState.isModelDownloading {
                     Text("✓ Cached locally")
                         .font(.system(size: 10))
                         .foregroundColor(.green.opacity(0.6))
@@ -201,7 +201,7 @@ struct OnboardingView: View {
         .padding(.horizontal, 48)
         .onAppear {
             // Set the model when entering this step
-            appState.pythonService.setModel(selectedModel)
+            appState.nativeEngine.setModel(selectedModel)
         }
         .onChange(of: appState.isReady) { oldValue, newValue in
             // Auto-advance when model becomes ready
@@ -220,7 +220,7 @@ struct OnboardingView: View {
             return "Model Ready"
         } else if appState.isModelDownloading {
             return "Downloading..."
-        } else if appState.pythonService.isModelCached {
+        } else if appState.nativeEngine.isModelCached {
             return "Loading Model"
         } else {
             return "Preparing Model"

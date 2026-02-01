@@ -7,7 +7,7 @@ final class VoiceScribeTests: XCTestCase {
     
     @MainActor
     func testASRModelInitialization() async {
-        let service = PythonASRService()
+        let service = NativeASREngine()
         let model = ASRModel(service: service)
         let status = await model.status
         XCTAssertEqual(status, "Idle", "ASRModel should start in Idle state")
@@ -58,28 +58,27 @@ final class VoiceScribeTests: XCTestCase {
         XCTAssertFalse(recorder.isRecording)
     }
     
-    // MARK: - PythonASRService Tests
+    // MARK: - NativeASREngine Tests
     
     @MainActor
-    func testPythonASRServiceInitialState() {
-        let service = PythonASRService()
+    func testNativeASREngineInitialState() {
+        let service = NativeASREngine()
         
         XCTAssertFalse(service.isReady, "Should not be ready before starting")
         XCTAssertFalse(service.isModelCached, "Model should not be cached initially")
         XCTAssertNil(service.lastError, "Should have no error initially")
     }
     
-    // MARK: - WAV Writing Tests
+    // MARK: - Feature Extraction Tests
     
-    @MainActor
-    func testWAVFileWriting() async {
-        let service = PythonASRService()
-        let _ = ASRModel(service: service)
-        
-        // Generate test samples (1 second of silence at 16kHz)
+    func testAudioFeatureExtraction() {
+        let extractor = AudioFeatureExtractor()
         let samples = [Float](repeating: 0.0, count: 16000)
+        let expectedFrames = extractor.frameCount(sampleCount: samples.count)
         
-        XCTAssertEqual(samples.count, 16000, "Should have 1 second of samples")
+        let features = extractor.logMelSpectrogram(samples: samples)
+        
+        XCTAssertEqual(features.shape, [1, expectedFrames, extractor.configuration.melBinCount])
     }
     
     // MARK: - Integration Tests

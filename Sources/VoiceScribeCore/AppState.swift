@@ -21,14 +21,14 @@ public class AppState: ObservableObject {
     
     // MARK: - Services
     public let recorder = AudioRecorder()
-    public let pythonService = PythonASRService()
+    public let nativeEngine = NativeASREngine()
     public let asrModel: ASRModel
     
     private var cancellables = Set<AnyCancellable>()
     
     public init() {
         logger.info("🔧 AppState init")
-        self.asrModel = ASRModel(service: pythonService)
+        self.asrModel = ASRModel(service: nativeEngine)
         setupBindings()
         logger.info("🔧 AppState init complete")
     }
@@ -39,28 +39,28 @@ public class AppState: ObservableObject {
             .assign(to: \.audioLevel, on: self)
             .store(in: &cancellables)
         
-        pythonService.$status
+        nativeEngine.$status
             .receive(on: DispatchQueue.main)
             .assign(to: \.status, on: self)
             .store(in: &cancellables)
         
-        pythonService.$isReady
+        nativeEngine.$isReady
             .receive(on: DispatchQueue.main)
             .assign(to: \.isReady, on: self)
             .store(in: &cancellables)
         
-        pythonService.$downloadProgress
+        nativeEngine.$downloadProgress
             .receive(on: DispatchQueue.main)
             .map { !$0.isEmpty }
             .assign(to: \.isModelDownloading, on: self)
             .store(in: &cancellables)
         
-        pythonService.$downloadProgress
+        nativeEngine.$downloadProgress
             .receive(on: DispatchQueue.main)
             .assign(to: \.downloadProgress, on: self)
             .store(in: &cancellables)
         
-        pythonService.$lastError
+        nativeEngine.$lastError
             .receive(on: DispatchQueue.main)
             .assign(to: \.errorMessage, on: self)
             .store(in: &cancellables)
@@ -72,12 +72,12 @@ public class AppState: ObservableObject {
     public func initialize() async {
         logger.info("🔧 initialize() called")
         status = "Starting ASR Engine..."
-        await pythonService.startEngine()
+        await nativeEngine.startEngine()
         
         // Sync model preference
         let savedModel = UserDefaults.standard.string(forKey: "selectedModel") ?? "mlx-community/Qwen3-ASR-1.7B-8bit"
-        if savedModel != "mlx-community/Qwen3-ASR-1.7B-8bit" { // Optimization: Python defaults to 1.7B, only send if different or force it
-             pythonService.setModel(savedModel)
+        if savedModel != "mlx-community/Qwen3-ASR-1.7B-8bit" {
+             nativeEngine.setModel(savedModel)
         }
         
         logger.info("🔧 initialize() complete")
@@ -86,7 +86,7 @@ public class AppState: ObservableObject {
     
     public func shutdown() {
         logger.info("🔧 shutdown() called")
-        pythonService.stopEngine()
+        nativeEngine.stopEngine()
     }
     
     // MARK: - Recording
