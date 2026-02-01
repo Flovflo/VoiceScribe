@@ -1,0 +1,37 @@
+# Build artifacts
+.build/
+*.xcodeproj
+xcuserdata/
+DerivedData/
+
+# Swift Package Manager
+.swiftpm/
+Package.resolved
+
+# macOS
+.DS_Store
+*.app
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.Python
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.xcworkspace
+
+# Test files
+test_*.swift
+*.wav
+
+# Model cache (downloaded at runtime)
+models/
+
+# Logs
+*.log
+*.ips
