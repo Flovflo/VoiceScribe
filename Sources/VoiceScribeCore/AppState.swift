@@ -7,6 +7,8 @@ private let logger = Logger(subsystem: "com.voicescribe", category: "AppState")
 
 @MainActor
 public class AppState: ObservableObject {
+    public static let shared = AppState()
+    
     // MARK: - Published State
     @Published public var transcript: String = ""
     @Published public var status: String = "Initializing..."
@@ -114,12 +116,12 @@ public class AppState: ObservableObject {
         
         let samples = recorder.stopRecording()
         isRecording = false
-        status = "Processing audio..."
+        status = "Processing..."
         
         logger.info("🎙️ Got \(samples.count) samples")
         
         guard !samples.isEmpty else {
-            status = "No audio recorded"
+            status = "No audio"
             return
         }
         
@@ -129,15 +131,26 @@ public class AppState: ObservableObject {
             logger.info("🎙️ Transcription result: \(text.prefix(50))...")
             transcript = text
             
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(text, forType: .string)
-            
-            status = "✅ Copied to clipboard"
+            if !text.isEmpty {
+                // Copy to clipboard
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(text, forType: .string)
+                
+                status = "✅ Copied"
+                
+                // Auto Paste
+                InputInjector.pasteFromClipboard()
+                
+                // Hide window logic should be handled by View/Delegate observing this state
+            }
             
             try? await Task.sleep(for: .seconds(2))
             if !isRecording {
                 status = isReady ? "Ready" : "Waiting..."
+                if !text.isEmpty {
+                    transcript = "" // Clear for next time
+                }
             }
         }
     }
