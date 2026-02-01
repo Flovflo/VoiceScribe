@@ -6,8 +6,6 @@
 
 
 
-![VoiceScribe Icon](AppIcon.png)
-
 VoiceScribe is a native, ultra-fast, on-device speech-to-text tool designed for macOS users who want privacy and speed. Powered by Apple's **MLX** framework and the **Qwen3-ASR** model, it runs locally on your Apple Silicon chip—no data ever leaves your device.
 
 ![macOS](https://img.shields.io/badge/macOS-14.0+-000000?style=flat&logo=apple)
