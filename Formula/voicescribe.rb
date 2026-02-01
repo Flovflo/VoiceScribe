@@ -1,39 +1,39 @@
 class Voicescribe < Formula
   desc "Invisible AI Stenographer for macOS (MLX-powered + Qwen3-ASR)"
   homepage "https://github.com/Flovflo/VoiceScribe"
-  url "https://github.com/Flovflo/VoiceScribe/releases/download/v1.1.0/VoiceScribe-v1.1.0.tar.gz"
-  sha256 "5c048237a0c18cc6e6f9ba7374942491d48fa2230659132a9374ec610b4c9753"
+  url "https://github.com/Flovflo/VoiceScribe/releases/download/v1.2.0/VoiceScribe-v1.2.0.tar.gz"
+  sha256 "8f58ab5b6a61696d86b88d7ee77f72518c0e81efff4529ca5593b0e9b1231219"
+  version "1.2.0"
   license "MIT"
 
-  head "https://github.com/Flovflo/VoiceScribe.git", branch: "refactor/native-mlx"
-
-  depends_on "python@3.11"
+  depends_on :macos
+  depends_on arch: :arm64
 
   def install
-     if build.head?
-        system "swift", "build", "-c", "release", "--arch", "arm64"
-        system "./package_app.sh"
-        prefix.install "VoiceScribe.app"
-     else
-        prefix.install "VoiceScribe.app"
-     end
-     
-     bin.write_exec_script "#{prefix}/VoiceScribe.app/Contents/MacOS/VoiceScribe"
+    prefix.install "VoiceScribe.app"
+    bin.write_exec_script "#{prefix}/VoiceScribe.app/Contents/MacOS/VoiceScribe"
+  end
+
+  def post_install
+    # Link app to /Applications for easy access
+    system "ln", "-sf", "#{prefix}/VoiceScribe.app", "/Applications/VoiceScribe.app"
   end
 
   def caveats
     <<~EOS
-      VoiceScribe v1.1 is installed! 
-      
-      To run it:
+      🎙️ VoiceScribe v1.2.0 is installed!
+
+      To launch:
         open #{opt_prefix}/VoiceScribe.app
-      
-      REQUIRED Dependencies (run this):
+        # Or find it in Launchpad!
+
+      REQUIRED - Install Python dependencies:
         pip3 install git+https://github.com/Blaizzy/mlx-audio.git
-        
-      (Ensure python3 is in your path and has mlx-audio installed)
-      
-      Note: Grant Accessibility Access when prompted.
+
+      PERMISSIONS:
+        Grant Accessibility & Microphone access when prompted.
+
+      HOTKEY: Option + Space to start/stop recording.
     EOS
   end
 end
