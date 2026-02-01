@@ -2,7 +2,6 @@
 
 **The Invisible AI Stenographer for macOS.**
 
-![VoiceScribe Glass Mode](assets/screenshot.png)
 
 VoiceScribe is a native, ultra-fast, on-device speech-to-text tool designed for macOS users who want privacy and speed. Powered by Apple's **MLX** framework and the **Qwen3-ASR** model, it runs locally on your Apple Silicon chip—no data ever leaves your device.
 
