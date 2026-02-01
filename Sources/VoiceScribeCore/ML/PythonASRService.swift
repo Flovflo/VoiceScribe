@@ -188,6 +188,9 @@ public class PythonASRService: ObservableObject {
             let model: String?
             let path: String?
             let error: String?
+            let progress: Int?
+            let cached: Bool?
+            let short_name: String?
         }
         
         guard let msg = try? JSONDecoder().decode(Message.self, from: data) else {
@@ -199,11 +202,28 @@ public class PythonASRService: ObservableObject {
         case "status":
             handleStatusMessage(state: msg.state ?? "", details: msg.details ?? "")
             
+        case "download_progress":
+            if let progress = msg.progress {
+                let modelName = msg.model ?? "model"
+                downloadProgress = "\(modelName): \(progress)%"
+                if progress >= 100 {
+                    downloadProgress = ""
+                }
+            }
 
         case "ready":
             status = msg.message ?? "Ready"
             isReady = true
             isModelCached = true
+            downloadProgress = ""
+            
+        case "model_status":
+            if let cached = msg.cached {
+                isModelCached = cached
+                if cached {
+                    status = "Model cached"
+                }
+            }
             
         case "download_start":
             status = "Downloading \(msg.model ?? "model")..."

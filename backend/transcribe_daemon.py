@@ -16,8 +16,9 @@ def send_message(msg_type, **kwargs):
 try:
     import mlx.core as mx
     from mlx_audio.stt import load
+    from huggingface_hub import snapshot_download, HfFileSystem
 except ImportError:
-    send_message("fatal", message="Missing dependencies. Please run: pip install git+https://github.com/Blaizzy/mlx-audio.git")
+    send_message("fatal", message="Missing dependencies. Please run: pip install git+https://github.com/Blaizzy/mlx-audio.git huggingface_hub")
     sys.exit(1)
 
 # Default model
@@ -25,22 +26,48 @@ DEFAULT_MODEL = "mlx-community/Qwen3-ASR-1.7B-8bit"
 current_model = None
 model_instance = None
 
+def is_model_cached(model_name):
+    """Check if model is already downloaded in HuggingFace cache."""
+    try:
+        cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
+        # Convert model name to cache folder format
+        # e.g., "mlx-community/Qwen3-ASR-1.7B-8bit" -> "models--mlx-community--Qwen3-ASR-1.7B-8bit"
+        cache_folder = f"models--{model_name.replace('/', '--')}"
+        model_cache_path = os.path.join(cache_dir, cache_folder)
+        
+        if os.path.exists(model_cache_path):
+            # Check if there are snapshot folders (indicates complete download)
+            snapshots_path = os.path.join(model_cache_path, "snapshots")
+            if os.path.exists(snapshots_path) and os.listdir(snapshots_path):
+                return True
+        return False
+    except Exception:
+        return False
+
 def load_model(model_name=DEFAULT_MODEL):
     global current_model, model_instance
     
     if current_model == model_name and model_instance is not None:
         return
     
-
     try:
         short_name = model_name.split('/')[-1]
-        send_message("status", state="downloading", details=f"Downloading {short_name}...")
-        # Load logic
+        
+        # Check if model is already cached
+        if is_model_cached(model_name):
+            send_message("status", state="loading", details=f"Loading {short_name} (cached)")
+        else:
+            send_message("status", state="downloading", details=f"Downloading {short_name}...")
+            send_message("download_progress", progress=0, model=short_name)
+        
+        # Load model (this will download if needed)
         model_instance = load(model_name)
         current_model = model_name
+        
+        send_message("download_progress", progress=100, model=short_name)
         send_message("ready", model=model_name, message=f"Ready ({short_name})")
+        
     except Exception as e:
-
         send_message("error", message=f"Failed to load model {model_name}: {str(e)}")
         current_model = None
         model_instance = None
@@ -61,15 +88,6 @@ def transcribe(audio_path, language=None):
         send_message("status", state="transcribing")
         start_time = time.time()
         
-        # Generate transcription
-        # Qwen3-ASR supports language auto-detection if None? 
-        # The README says: result = model.generate("audio.wav", language="English")
-        # If language is None, maybe it defaults or detects?
-        # Let's try passing language if set, else let it default (or use English/auto)
-        
-        # Note: Qwen3 might require language. Defaulting to auto if supported, or English/Multi.
-        # Based on docs, supported languages are limited. I'll default to "auto" if None.
-        
         kwargs = {}
         if language:
             kwargs["language"] = language
@@ -77,14 +95,18 @@ def transcribe(audio_path, language=None):
         result = model_instance.generate(audio_path, **kwargs)
         
         duration = time.time() - start_time
-        
-        # result.text contains the text
         text = result.text.strip()
         
         send_message("transcription", text=text, language=language or "auto", duration=duration)
         
     except Exception as e:
         send_message("error", message=f"Transcription failed: {str(e)}")
+
+def check_model_status(model_name):
+    """Check and report if a model is cached without loading it."""
+    short_name = model_name.split('/')[-1]
+    cached = is_model_cached(model_name)
+    send_message("model_status", model=model_name, cached=cached, short_name=short_name)
 
 def main():
     send_message("status", state="initializing", details="Starting Qwen3-ASR Engine")
@@ -105,6 +127,11 @@ def main():
         if line.startswith("LOAD_MODEL:"):
             new_model = line.split(":", 1)[1].strip()
             load_model(new_model)
+            continue
+        
+        if line.startswith("CHECK_MODEL:"):
+            model_to_check = line.split(":", 1)[1].strip()
+            check_model_status(model_to_check)
             continue
             
         # Otherwise interpret as audio path

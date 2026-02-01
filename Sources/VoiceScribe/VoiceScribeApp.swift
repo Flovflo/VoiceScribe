@@ -19,22 +19,51 @@ struct VoiceScribeApp: App {
     }
 }
 
-
-
-
-
+// Custom window that accepts clicks even when borderless
+class ClickableWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+    
+    func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        return true
+    }
+}
 
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
-    var floatWindow: NSWindow?
+    var floatWindow: ClickableWindow?
     var statusItem: NSStatusItem?
     var settingsWindow: NSWindow?
+    var onboardingWindow: NSWindow?
+    
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if let window = NSApplication.shared.windows.first {
-            floatWindow = window
-            configureWindow(window)
+        // Close any SwiftUI-created windows
+        for window in NSApplication.shared.windows {
+            window.close()
+        }
+        
+        // Create our own clickable window
+        let window = ClickableWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 450, height: 80),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        
+        let hostingView = NSHostingView(rootView: GlassView())
+        window.contentView = hostingView
+        
+        floatWindow = window
+        configureWindow(window)
+        
+        // Show onboarding on first launch, otherwise show HUD
+        if !hasCompletedOnboarding {
+            showOnboarding()
+        } else {
+            window.makeKeyAndOrderFront(nil)
         }
         
         setupStatusItem()
@@ -44,6 +73,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         HotKeyManager.shared.onTrigger = { [weak self] in
             self?.toggleApp()
         }
+    }
+    
+    func showOnboarding() {
+        if onboardingWindow == nil {
+            let onboardingView = NSHostingView(rootView: OnboardingView())
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 500, height: 450),
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.center()
+            window.title = "Welcome to VoiceScribe"
+            window.isReleasedWhenClosed = false
+            window.contentView = onboardingView
+            window.level = .floating
+            window.hasShadow = true
+            onboardingWindow = window
+        }
+        
+        onboardingWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
     
     private func setupStatusItem() {
@@ -221,22 +274,17 @@ struct GlassView: View {
                     }
                 }
             } else {
-                HStack(spacing: 12) {
-
-                    Button(action: {
-                        if let delegate = NSApp.delegate as? AppDelegate {
-                            delegate.openSettings()
-                        }
-                    }) {
-                        Image(systemName: "slider.horizontal.3")
-
-                            .font(.system(size: 16))
-                            .foregroundColor(.white.opacity(0.7))
-                            .padding(8)
-                            .background(Circle().fill(Color.white.opacity(0.1)))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Model Settings")
+                HStack(spacing: 8) {
+                    // Just show keyboard shortcut hint and CPU badge
+                    Text("⌥ Space")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.5))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(Color.white.opacity(0.1))
+                        )
                     
                     Image(systemName: "cpu")
                         .font(.system(size: 12))

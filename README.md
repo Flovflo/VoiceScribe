@@ -1,87 +1,132 @@
-# VoiceScribe 🔮
+# VoiceScribe 🎙️
 
-**The Invisible AI Stenographer for macOS.**
-
-
-
-
-
-VoiceScribe is a native, ultra-fast, on-device speech-to-text tool designed for macOS users who want privacy and speed. Powered by Apple's **MLX** framework and the **Qwen3-ASR** model, it runs locally on your Apple Silicon chip—no data ever leaves your device.
+**The Invisible AI Stenographer for macOS**
 
 ![macOS](https://img.shields.io/badge/macOS-14.0+-000000?style=flat&logo=apple)
-![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-M1%2FM2%2FM3-green)
-![Privacy](https://img.shields.io/badge/Privacy-100%25_Local-blue)
-![License](https://img.shields.io/badge/License-MIT-purple)
+![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-M1%2FM2%2FM3%2FM4-green)
+![License](https://img.shields.io/badge/license-MIT-blue)
 
-## Features
+VoiceScribe is a native, ultra-fast, on-device speech-to-text tool for macOS. Powered by **MLX** and **Qwen3-ASR**, it runs entirely on your Apple Silicon chip—no data ever leaves your device.
 
-- **🔮 Liquid Glass HUD**: A transparent, floating HUD centered at the top of your screen that stays out of your way.
-- **🛰️ Menu Bar Control**: Invisible by default, accessible via a permanent menu bar icon.
-- **⚙️ Model Selection**: Choose between **Qwen3-ASR-0.6B** (Fast) and **1.7B** (Accurate) variants.
-- **⚡️ Native MLX Engine**: Optimized for M-series chips using Apple's latest machine learning framework.
-- **⌨️ Auto-Paste**: Transcribed text acts like magic—it's automatically typed into your active app (Notes, VS Code, Browser...).
-- **🎹 Global Hotkey**: Press `Option + Space` anywhere to start/stop recording.
-- **🔒 100% Private**: Runs offline. Zero cloud dependency.
+---
 
-## Installation
+## ✨ Features
 
-### Option 1: Homebrew (Recommended)
+- **100% Local** — All processing happens on your Mac
+- **Privacy First** — No data leaves your device, ever
+- **Ultra-Fast** — Optimized for Apple Silicon with MLX
+- **Invisible UX** — Minimal floating HUD, keyboard-driven
+- **Auto-Type** — Transcribed text is typed automatically
+
+---
+
+## 🚀 Quick Install
+
+### Via Homebrew (Recommended)
 
 ```bash
-brew tap Flovflo/voicescribe https://github.com/Flovflo/VoiceScribe
-brew install --HEAD voicescribe
+brew tap Flovflo/voicescribe
+brew install voicescribe
 ```
 
-### Option 2: Build from Source
+### Manual Install
 
-Requirements: macOS 14+, Python 3.11+, and an Apple Silicon Mac.
+```bash
+git clone https://github.com/Flovflo/VoiceScribe.git
+cd VoiceScribe
+./install.sh
+```
 
-1.  **Clone the repo**
-    ```bash
-    git clone https://github.com/Flovflo/VoiceScribe.git
-    cd VoiceScribe
-    ```
+---
 
-2.  **Setup Python Environment** (for the MLX engine)
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate
-    pip install git+https://github.com/Blaizzy/mlx-audio.git
-    ```
+## ⌨️ Usage
 
-3.  **Build & Run**
-    ```bash
-    swift build -c release
-    ./package_app.sh
-    open VoiceScribe.app
-    ```
+| Action | Shortcut |
+|--------|----------|
+| Start/Stop Recording | `⌥ Option` + `Space` |
 
-## Usage
+1. Press **⌥ Space** anywhere on your Mac
+2. Speak when you see the floating HUD
+3. Press **⌥ Space** again to stop
+4. Text is automatically typed at your cursor!
 
-1.  **Launch VoiceScribe**.
-2.  Grant **Accessibility Permissions** when asked (needed for Global Hotkeys and Auto-Paste).
-3.  Place your cursor in any text field.
-4.  Press **`Option + Space`**.
-5.  Speak when you see the HUD wave.
-6.  Press **`Option + Space`** again to finish.
-7.  ✨ The text appears magically!
-8.  **Settings**: Click the slider icon 🎛️ in the HUD or use the Menu Bar icon to change models.
+---
 
-## Architecture
+## 🧠 Models
 
-VoiceScribe combines a native Swift/SwiftUI interface with a highly optimized Python backend:
+VoiceScribe supports multiple Qwen3-ASR models:
 
-- **Frontend**: SwiftUI + AppKit (Floating Window, Status Bar Item, Global Hotkeys).
-- **Backend**: Python + `mlx-audio` (Apple MLX Framework + Qwen3).
-- **Communication**: Unix Pipes (stdin/stdout) for zero-latency control.
+| Model | Size | Speed | Accuracy |
+|-------|------|-------|----------|
+| Qwen3-ASR-0.6B | ~600MB | ⚡ Fast | Good |
+| Qwen3-ASR-1.7B | ~1.7GB | Normal | ✓ Better |
 
-## Credits
+Models are downloaded automatically on first use and cached locally in `~/.cache/huggingface/`.
 
-- **Model**: Qwen3-ASR (0.6B / 1.7B) via `mlx-audio`
-- **Engine**: [Apple MLX](https://github.com/ml-explore/mlx)
-- **Design**: Inspired by macOS "Liquid Glass" aesthetics.
+---
 
+## 🛠️ Requirements
 
-## License
+- **macOS 14.0+** (Sonoma or later)
+- **Apple Silicon** (M1/M2/M3/M4)
+- **Python 3.11+** with:
+  - `mlx`
+  - `mlx-audio`
 
-MIT License. Copyright (c) 2026 Florian.
+### Install Python Dependencies
+
+```bash
+pip install mlx mlx-audio huggingface_hub
+```
+
+---
+
+## 📦 Project Structure
+
+```
+VoiceScribe/
+├── Sources/
+│   ├── VoiceScribe/          # Main app (SwiftUI)
+│   │   ├── VoiceScribeApp.swift
+│   │   ├── OnboardingView.swift
+│   │   └── SettingsView.swift
+│   └── VoiceScribeCore/      # Core library
+│       ├── ML/               # ASR Service
+│       ├── Sensors/          # Audio recording
+│       └── Utils/            # Hotkey, input injection
+├── backend/
+│   └── transcribe_daemon.py  # Python ASR engine
+├── Formula/
+│   └── voicescribe.rb        # Homebrew formula
+└── Package.swift
+```
+
+---
+
+## 🔐 Privacy
+
+VoiceScribe is designed with privacy as the core principle:
+
+- ✅ All audio processing happens locally on your Mac
+- ✅ No network requests for transcription
+- ✅ No telemetry or analytics
+- ✅ Audio is never saved to disk (processed in memory)
+- ✅ You own your data
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+---
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+<p align="center">
+  <sub>Built with ❤️ for Apple Silicon</sub>
+</p>
