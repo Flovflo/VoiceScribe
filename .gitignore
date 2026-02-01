@@ -1,5 +1,8 @@
-# Build artifacts
+# Build
 .build/
+VoiceScribe.app/
+VoiceScribe-v*.tar.gz
+facts
 *.xcodeproj
 xcuserdata/
 DerivedData/

@@ -199,13 +199,14 @@ public class PythonASRService: ObservableObject {
         case "status":
             handleStatusMessage(state: msg.state ?? "", details: msg.details ?? "")
             
+
         case "ready":
-            status = "Ready"
+            status = msg.message ?? "Ready"
             isReady = true
             isModelCached = true
             
         case "download_start":
-            status = "Downloading model..."
+            status = "Downloading \(msg.model ?? "model")..."
             downloadProgress = "Starting download of \(msg.model ?? "model")..."
             
         case "download_complete":
@@ -221,7 +222,13 @@ public class PythonASRService: ObservableObject {
             if let text = msg.text {
                 activeContinuation?.resume(returning: text)
                 activeContinuation = nil
-                status = "Ready"
+                // Preserve model name in status if possible
+                if status.contains("Ready") {
+                     // Keep it
+                } else {
+                     status = "Ready"
+                }
+
             }
             
         case "error":
@@ -245,14 +252,15 @@ public class PythonASRService: ObservableObject {
         case "initializing":
             status = "Initializing..."
         case "downloading":
-            status = "Downloading Model..."
+            status = details.isEmpty ? "Downloading Model..." : details
             downloadProgress = details
         case "cached":
             status = "Model found in cache"
             isModelCached = true
         case "loading":
-            status = "Loading Model..."
+            status = details.isEmpty ? "Loading Model..." : details
             downloadProgress = details
+
         case "transcribing":
             status = "Transcribing..."
         case "shutdown":

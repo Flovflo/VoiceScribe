@@ -31,13 +31,16 @@ def load_model(model_name=DEFAULT_MODEL):
     if current_model == model_name and model_instance is not None:
         return
     
+
     try:
-        send_message("status", state="downloading", details=f"Downloading/Loading {model_name}...")
+        short_name = model_name.split('/')[-1]
+        send_message("status", state="downloading", details=f"Downloading {short_name}...")
         # Load logic
         model_instance = load(model_name)
         current_model = model_name
-        send_message("ready", model=model_name)
+        send_message("ready", model=model_name, message=f"Ready ({short_name})")
     except Exception as e:
+
         send_message("error", message=f"Failed to load model {model_name}: {str(e)}")
         current_model = None
         model_instance = None

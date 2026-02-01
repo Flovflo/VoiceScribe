@@ -14,9 +14,13 @@ rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
+
 echo "📋 Copying Artifacts..."
 cp ".build/arm64-apple-macosx/release/$BINARY_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp "backend/transcribe_daemon.py" "$APP_BUNDLE/Contents/Resources/"
+if [ -f "VoiceScribe.icns" ]; then
+    cp "VoiceScribe.icns" "$APP_BUNDLE/Contents/Resources/"
+fi
 
 echo "📝 Generating Info.plist..."
 cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
@@ -27,15 +31,17 @@ cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
     <key>CFBundleExecutable</key>
     <string>$APP_NAME</string>
     <key>CFBundleIdentifier</key>
-    <string>com.codex.$APP_NAME</string>
+    <string>com.voicescribe.app</string>
     <key>CFBundleName</key>
     <string>$APP_NAME</string>
+    <key>CFBundleIconFile</key>
+    <string>VoiceScribe</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.1</string>
+    <string>1.1.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
     <key>LSUIElement</key>
-    <true/> <!-- Menu Bar App Mode -->
+    <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>VoiceScribe needs specific access to your microphone to transcribe your voice locally.</string>
     <key>NSHighResolutionCapable</key>
@@ -43,6 +49,7 @@ cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
 </dict>
 </plist>
 EOF
+
 
 echo "✍️ Signing Bundle..."
 codesign --force --deep --sign - "$APP_BUNDLE"

@@ -126,10 +126,14 @@ public class AudioRecorder: ObservableObject {
         isRecording = true
         
         // Poll audio level on main thread
+
         levelTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            self.audioLevel = min(self.captureEngine.lastRMS * 3, 1.0)
+            Task { @MainActor in
+                self.audioLevel = min(self.captureEngine.lastRMS * 3, 1.0)
+            }
         }
+
         
         logger.info("Recording started")
     }
