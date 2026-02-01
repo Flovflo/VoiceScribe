@@ -5,7 +5,7 @@ class Voicescribe < Formula
   sha256 "5c048237a0c18cc6e6f9ba7374942491d48fa2230659132a9374ec610b4c9753"
   license "MIT"
 
-  head "https://github.com/Flovflo/VoiceScribe.git", branch: "main"
+  head "https://github.com/Flovflo/VoiceScribe.git", branch: "refactor/native-mlx"
 
   depends_on "python@3.11"
 
