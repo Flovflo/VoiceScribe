@@ -3,7 +3,9 @@
 **The Invisible AI Stenographer for macOS.**
 
 
-VoiceScribe is a native, ultra-fast, on-device speech-to-text tool designed for macOS users who want privacy and speed. Powered by Apple's **MLX** framework and the **Qwen3-ASR** model, it runs locally on your Apple Silicon chip—no data ever leaves your device.
+
+VoiceScribe is a native, ultra-fast, on-device speech-to-text tool designed for macOS users who want privacy and speed. Powered by Apple's **MLX** framework and the **Whisper Large v3 Turbo** model, it runs locally on your Apple Silicon chip—no data ever leaves your device.
+
 
 ![macOS](https://img.shields.io/badge/macOS-14.0+-000000?style=flat&logo=apple)
 ![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-M1%2FM2%2FM3-green)
@@ -71,8 +73,10 @@ VoiceScribe combines a native Swift/SwiftUI interface with a highly optimized Py
 
 ## Credits
 
-- **Model**: Qwen3-ASR / Whisper Large v3 Turbo
+
+- **Model**: Whisper Large v3 Turbo (MLX Optimized)
 - **Engine**: [Apple MLX](https://github.com/ml-explore/mlx)
+
 - **Design**: Inspired by macOS "Liquid Glass" aesthetics.
 
 ## License
