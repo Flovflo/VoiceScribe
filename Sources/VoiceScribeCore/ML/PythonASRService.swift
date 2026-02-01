@@ -27,8 +27,26 @@ public class PythonASRService: ObservableObject {
         lastError = nil
         
         // Locate Python and script
-        let pythonPath = "/Users/florian/Documents/Projet/Voice/venv/bin/python"
+
+        // Locate Python
+        let pythonPath: String
+        let possiblePaths = [
+            "/opt/homebrew/bin/python3", // Homebrew Apple Silicon
+            "/usr/local/bin/python3",    // Homebrew Intel
+            "/usr/bin/python3"           // System
+        ]
         
+        if let found = possiblePaths.first(where: { FileManager.default.fileExists(atPath: $0) }) {
+            pythonPath = found
+        } else {
+            // Fallback (might fail if not in PATH/sandbox issues)
+            pythonPath = "/usr/bin/python3"
+        }
+        
+        // Check local venv for dev (override)
+        let devVenv = "/Users/florian/Documents/Projet/Voice/venv/bin/python"
+        let finalPythonPath = FileManager.default.fileExists(atPath: devVenv) ? devVenv : pythonPath
+
         // Try bundle first, then development path
         let scriptPath: String
         if let bundledPath = Bundle.main.path(forResource: "transcribe_daemon", ofType: "py") {
@@ -37,10 +55,10 @@ public class PythonASRService: ObservableObject {
             scriptPath = "/Users/florian/Documents/Projet/Voice/VoiceScribe/backend/transcribe_daemon.py"
         }
         
-        guard FileManager.default.fileExists(atPath: pythonPath) else {
-            status = "Error: Python not found"
-            lastError = "Python interpreter not found at: \(pythonPath)"
-            return
+        if !FileManager.default.fileExists(atPath: finalPythonPath) {
+             status = "Error: Python not found"
+             lastError = "Could not find python3 in standard locations."
+             return
         }
         
         guard FileManager.default.fileExists(atPath: scriptPath) else {
@@ -49,11 +67,12 @@ public class PythonASRService: ObservableObject {
             return
         }
         
-        print("🐍 Starting Python: \(pythonPath)")
+        print("🐍 Starting Python: \(finalPythonPath)")
         print("📄 Script: \(scriptPath)")
         
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: pythonPath)
+        process.executableURL = URL(fileURLWithPath: finalPythonPath)
+
         process.arguments = [scriptPath]
         
         // Set up pipes

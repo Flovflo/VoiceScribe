@@ -1,36 +1,37 @@
 class Voicescribe < Formula
   desc "Invisible AI Stenographer for macOS (MLX-powered)"
   homepage "https://github.com/Flovflo/VoiceScribe"
+  url "https://github.com/Flovflo/VoiceScribe/releases/download/v1.0.0/VoiceScribe-v1.0.0.tar.gz"
+  sha256 "572c191d5f0aeb0dde876ee56341ccdab97dc2ae546ca84ccde38df40817cf72"
+  license "MIT"
+
   head "https://github.com/Flovflo/VoiceScribe.git", branch: "main"
 
-  depends_on xcode: ["15.0", :build]
   depends_on "python@3.11"
 
   def install
-    system "swift", "build", "--disable-sandbox", "-c", "release"
-    bin.install ".build/release/VoiceScribe"
-    
-    # Install backend and resources
-    (prefix/"backend").install "backend/transcribe_daemon.py"
-    
-    # Create wrapper script that sets up venv if needed
-    (bin/"voicescribe-wrapper").write <<~EOS
-      #!/bin/bash
-      export PATH="#{HOMEBREW_PREFIX}/bin:$PATH"
-      # Ensure python venv exists or use system? 
-      # For Homebrew, we might rely on the user to have dependencies or vendor them.
-      # Simplified for HEAD formula: assume user handles python deps or we install them.
-      exec "#{bin}/VoiceScribe" "$@"
-    EOS
+     if build.head?
+        system "swift", "build", "-c", "release", "--arch", "arm64"
+        system "./package_app.sh"
+        prefix.install "VoiceScribe.app"
+     else
+        prefix.install "VoiceScribe.app"
+     end
+     
+     bin.write_exec_script "#{prefix}/VoiceScribe.app/Contents/MacOS/VoiceScribe"
   end
 
   def caveats
     <<~EOS
-      VoiceScribe requires Python dependencies to run the MLX engine.
-      Please run:
-        pip3 install mlx-whisper
+      VoiceScribe is installed! 
       
-      Also grant Accessibility permissions to Terminal or the App to use Global Hotkeys.
+      To run it:
+        open #{opt_prefix}/VoiceScribe.app
+      
+      Dependencies:
+        pip3 install mlx-whisper (ensure python3 is in your PATH)
+        
+      Note: Grant Accessibility Access when prompted.
     EOS
   end
 end
