@@ -59,12 +59,16 @@ cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
     <string>$APP_NAME</string>
     <key>CFBundleIconFile</key>
     <string>VoiceScribe</string>
+    <key>CFBundleDisplayName</key>
+    <string>VoiceScribe</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.1.0</string>
+    <string>1.2.0</string>
     <key>CFBundleVersion</key>
-    <string>2</string>
+    <string>3</string>
     <key>LSUIElement</key>
-    <true/>
+    <false/>
     <key>NSMicrophoneUsageDescription</key>
     <string>VoiceScribe needs specific access to your microphone to transcribe your voice locally.</string>
     <key>NSHighResolutionCapable</key>
