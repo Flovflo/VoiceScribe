@@ -123,23 +123,36 @@ public class PythonASRService: ObservableObject {
         }
     }
     
+
     public func stopEngine() {
         if let process = process, process.isRunning {
-            // Send quit command
-            if let data = "QUIT\n".data(using: .utf8) {
-                try? stdinPipe?.fileHandleForWriting.write(contentsOf: data)
-            }
-            
-            // Give it a moment, then terminate
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                if process.isRunning {
-                    process.terminate()
-                }
-            }
+             // Send quit command
+             if let data = "QUIT\n".data(using: .utf8) {
+                 try? stdinPipe?.fileHandleForWriting.write(contentsOf: data)
+             }
+             
+             // Give it a moment, then terminate
+             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                 if process.isRunning {
+                     process.terminate()
+                 }
+             }
+         }
+         isReady = false
+         status = "Stopped"
+     }
+    
+    public func setModel(_ modelName: String) {
+        guard let pipe = stdinPipe else { return }
+        print("Changing model to: \(modelName)")
+        status = "Loading \(modelName)..."
+        
+        let command = "LOAD_MODEL:\(modelName)\n"
+        if let data = command.data(using: .utf8) {
+            try? pipe.fileHandleForWriting.write(contentsOf: data)
         }
-        isReady = false
-        status = "Stopped"
     }
+
     
     // MARK: - Output Parsing
     

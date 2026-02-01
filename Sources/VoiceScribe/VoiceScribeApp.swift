@@ -13,9 +13,15 @@ struct VoiceScribeApp: App {
                 .edgesIgnoringSafeArea(.all)
                 .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
         }
+
         .windowStyle(.hiddenTitleBar)
+        
+        Settings {
+            SettingsView()
+        }
     }
 }
+
 
 
 @MainActor

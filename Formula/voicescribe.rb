@@ -1,8 +1,8 @@
 class Voicescribe < Formula
-  desc "Invisible AI Stenographer for macOS (MLX-powered)"
+  desc "Invisible AI Stenographer for macOS (MLX-powered + Qwen3-ASR)"
   homepage "https://github.com/Flovflo/VoiceScribe"
-  url "https://github.com/Flovflo/VoiceScribe/releases/download/v1.0.0/VoiceScribe-v1.0.0.tar.gz"
-  sha256 "572c191d5f0aeb0dde876ee56341ccdab97dc2ae546ca84ccde38df40817cf72"
+  url "https://github.com/Flovflo/VoiceScribe/releases/download/v1.1.0/VoiceScribe-v1.1.0.tar.gz"
+  sha256 "5c048237a0c18cc6e6f9ba7374942491d48fa2230659132a9374ec610b4c9753"
   license "MIT"
 
   head "https://github.com/Flovflo/VoiceScribe.git", branch: "main"
@@ -23,14 +23,16 @@ class Voicescribe < Formula
 
   def caveats
     <<~EOS
-      VoiceScribe is installed! 
+      VoiceScribe v1.1 is installed! 
       
       To run it:
         open #{opt_prefix}/VoiceScribe.app
       
-      Dependencies:
-        pip3 install mlx-whisper (ensure python3 is in your PATH)
+      REQUIRED Dependencies (run this):
+        pip3 install git+https://github.com/Blaizzy/mlx-audio.git
         
+      (Ensure python3 is in your path and has mlx-audio installed)
+      
       Note: Grant Accessibility Access when prompted.
     EOS
   end

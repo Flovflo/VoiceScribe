@@ -4,7 +4,9 @@
 
 
 
-VoiceScribe is a native, ultra-fast, on-device speech-to-text tool designed for macOS users who want privacy and speed. Powered by Apple's **MLX** framework and the **Whisper Large v3 Turbo** model, it runs locally on your Apple Silicon chip—no data ever leaves your device.
+
+VoiceScribe is a native, ultra-fast, on-device speech-to-text tool designed for macOS users who want privacy and speed. Powered by Apple's **MLX** framework and the **Qwen3-ASR** model, it runs locally on your Apple Silicon chip—no data ever leaves your device.
+
 
 
 ![macOS](https://img.shields.io/badge/macOS-14.0+-000000?style=flat&logo=apple)
@@ -43,7 +45,7 @@ Requirements: macOS 14+, Python 3.11+, and an Apple Silicon Mac.
     ```bash
     python3 -m venv venv
     source venv/bin/activate
-    pip install mlx-whisper
+    pip install git+https://github.com/Blaizzy/mlx-audio.git
     ```
 
 3.  **Build & Run**
@@ -74,7 +76,9 @@ VoiceScribe combines a native Swift/SwiftUI interface with a highly optimized Py
 ## Credits
 
 
-- **Model**: Whisper Large v3 Turbo (MLX Optimized)
+
+- **Model**: Qwen3-ASR (0.6B / 1.7B) via `mlx-audio`
+
 - **Engine**: [Apple MLX](https://github.com/ml-explore/mlx)
 
 - **Design**: Inspired by macOS "Liquid Glass" aesthetics.

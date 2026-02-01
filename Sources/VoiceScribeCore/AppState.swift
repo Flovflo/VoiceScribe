@@ -68,12 +68,21 @@ public class AppState: ObservableObject {
     
     // MARK: - Lifecycle
     
+
     public func initialize() async {
         logger.info("🔧 initialize() called")
         status = "Starting ASR Engine..."
         await pythonService.startEngine()
+        
+        // Sync model preference
+        let savedModel = UserDefaults.standard.string(forKey: "selectedModel") ?? "mlx-community/Qwen3-ASR-1.7B-8bit"
+        if savedModel != "mlx-community/Qwen3-ASR-1.7B-8bit" { // Optimization: Python defaults to 1.7B, only send if different or force it
+             pythonService.setModel(savedModel)
+        }
+        
         logger.info("🔧 initialize() complete")
     }
+
     
     public func shutdown() {
         logger.info("🔧 shutdown() called")
