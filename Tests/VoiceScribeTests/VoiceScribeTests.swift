@@ -95,13 +95,11 @@ final class VoiceScribeTests: XCTestCase {
         appState.transcript = "Integration test passed"
         XCTAssertEqual(appState.transcript, "Integration test passed")
         
-        // Test copy functionality exists
-        appState.copyToClipboard()
-        
         // Test clear functionality
         appState.clearTranscript()
         XCTAssertEqual(appState.transcript, "")
     }
+
     
     @MainActor
     func testAppStateShutdown() {

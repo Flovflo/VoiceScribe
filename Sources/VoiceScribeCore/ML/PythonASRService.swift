@@ -26,9 +26,7 @@ public class PythonASRService: ObservableObject {
         status = "Launching ASR Engine..."
         lastError = nil
         
-        // Locate Python and script
-
-        // Locate Python
+        // Locate Python from standard locations
         let pythonPath: String
         let possiblePaths = [
             "/opt/homebrew/bin/python3", // Homebrew Apple Silicon
@@ -39,39 +37,28 @@ public class PythonASRService: ObservableObject {
         if let found = possiblePaths.first(where: { FileManager.default.fileExists(atPath: $0) }) {
             pythonPath = found
         } else {
-            // Fallback (might fail if not in PATH/sandbox issues)
             pythonPath = "/usr/bin/python3"
         }
         
-        // Check local venv for dev (override)
-        let devVenv = "/Users/florian/Documents/Projet/Voice/venv/bin/python"
-        let finalPythonPath = FileManager.default.fileExists(atPath: devVenv) ? devVenv : pythonPath
-
-        // Try bundle first, then development path
-        let scriptPath: String
-        if let bundledPath = Bundle.main.path(forResource: "transcribe_daemon", ofType: "py") {
-            scriptPath = bundledPath
-        } else {
-            scriptPath = "/Users/florian/Documents/Projet/Voice/VoiceScribe/backend/transcribe_daemon.py"
+        // Script must be bundled in the app
+        guard let scriptPath = Bundle.main.path(forResource: "transcribe_daemon", ofType: "py") else {
+            status = "Error: Script not bundled"
+            lastError = "transcribe_daemon.py not found in app bundle. Please reinstall the app."
+            return
         }
         
-        if !FileManager.default.fileExists(atPath: finalPythonPath) {
+        if !FileManager.default.fileExists(atPath: pythonPath) {
              status = "Error: Python not found"
              lastError = "Could not find python3 in standard locations."
              return
         }
         
-        guard FileManager.default.fileExists(atPath: scriptPath) else {
-            status = "Error: Script not found"
-            lastError = "ASR script not found at: \(scriptPath)"
-            return
-        }
-        
-        print("🐍 Starting Python: \(finalPythonPath)")
+        print("🐍 Starting Python: \(pythonPath)")
         print("📄 Script: \(scriptPath)")
         
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: finalPythonPath)
+        process.executableURL = URL(fileURLWithPath: pythonPath)
+
 
         process.arguments = [scriptPath]
         

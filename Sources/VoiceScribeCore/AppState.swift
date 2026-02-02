@@ -164,16 +164,7 @@ public class AppState: ObservableObject {
         }
     }
     
-    // MARK: - Utilities
-    
     public func clearTranscript() {
         transcript = ""
-    }
-    
-    public func copyToClipboard() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(transcript, forType: .string)
-        status = "✅ Copied!"
     }
 }

@@ -12,17 +12,6 @@ public actor ASRModel {
         self.service = service
     }
     
-    public func loadModel() async {
-        status = "Starting Engine..."
-        await service.startEngine()
-        // Wait for ready? Service updates its own status. 
-        // We can poll or just trust the status from service
-        // Let's mirror the service status for convenience if needed, 
-        // but AppState should probably observe Service directly?
-        // For compatibility with previous API, we update our status.
-        status = "Ready" 
-    }
-    
     public func transcribe(samples: [Float]) async -> String {
         status = "Transcribing..."
         
