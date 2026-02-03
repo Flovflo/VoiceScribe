@@ -65,8 +65,8 @@ struct OnboardingView: View {
             // Icon
             ZStack {
                 Circle()
-                    .fill(Color.white.opacity(0.05))
-                    .frame(width: 80, height: 80)
+                .fill(Color.white.opacity(0.05))
+                .frame(width: 80, height: 80)
                 
                 Image(systemName: "waveform")
                     .font(.system(size: 32, weight: .light))
@@ -166,8 +166,8 @@ struct OnboardingView: View {
             }
             
             // Progress info
-            if !appState.downloadProgress.isEmpty {
-                Text(appState.downloadProgress)
+            if appState.downloadProgress > 0 && appState.downloadProgress < 1.0 {
+                Text("\(Int(appState.downloadProgress * 100))%")
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
                     .foregroundColor(.white.opacity(0.7))
                     .padding(.horizontal, 16)
@@ -188,7 +188,7 @@ struct OnboardingView: View {
                 }
                 .font(.system(size: 11))
                 
-                if appState.pythonService.isModelCached && !appState.isModelDownloading {
+                if appState.engine.isModelCached && !appState.isModelDownloading {
                     Text("✓ Cached locally")
                         .font(.system(size: 10))
                         .foregroundColor(.green.opacity(0.6))
@@ -201,7 +201,7 @@ struct OnboardingView: View {
         .padding(.horizontal, 48)
         .onAppear {
             // Set the model when entering this step
-            appState.pythonService.setModel(selectedModel)
+            appState.engine.setModel(selectedModel)
         }
         .onChange(of: appState.isReady) { oldValue, newValue in
             // Auto-advance when model becomes ready
@@ -220,7 +220,7 @@ struct OnboardingView: View {
             return "Model Ready"
         } else if appState.isModelDownloading {
             return "Downloading..."
-        } else if appState.pythonService.isModelCached {
+        } else if appState.engine.isModelCached {
             return "Loading Model"
         } else {
             return "Preparing Model"

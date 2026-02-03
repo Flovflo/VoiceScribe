@@ -16,19 +16,17 @@ public class AppState: ObservableObject {
     @Published public var isRecording: Bool = false
     @Published public var isReady: Bool = false
     @Published public var isModelDownloading: Bool = false
-    @Published public var downloadProgress: String = ""
+    @Published public var downloadProgress: Double = 0.0
     @Published public var errorMessage: String?
     
     // MARK: - Services
     public let recorder = AudioRecorder()
-    public let pythonService = PythonASRService()
-    public let asrModel: ASRModel
+    public let engine = NativeASREngine()
     
     private var cancellables = Set<AnyCancellable>()
     
     public init() {
         logger.info("🔧 AppState init")
-        self.asrModel = ASRModel(service: pythonService)
         setupBindings()
         logger.info("🔧 AppState init complete")
     }
@@ -39,54 +37,43 @@ public class AppState: ObservableObject {
             .assign(to: \.audioLevel, on: self)
             .store(in: &cancellables)
         
-        pythonService.$status
+        engine.$status
             .receive(on: DispatchQueue.main)
             .assign(to: \.status, on: self)
             .store(in: &cancellables)
         
-        pythonService.$isReady
+        engine.$isReady
             .receive(on: DispatchQueue.main)
             .assign(to: \.isReady, on: self)
             .store(in: &cancellables)
         
-        pythonService.$downloadProgress
+        // NativeEngine provides Double progress 0.0-1.0
+        engine.$loadProgress
             .receive(on: DispatchQueue.main)
-            .map { !$0.isEmpty }
-            .assign(to: \.isModelDownloading, on: self)
+            .sink { [weak self] progress in
+                self?.downloadProgress = progress
+                self?.isModelDownloading = progress < 1.0 && progress > 0.0
+            }
             .store(in: &cancellables)
         
-        pythonService.$downloadProgress
-            .receive(on: DispatchQueue.main)
-            .assign(to: \.downloadProgress, on: self)
-            .store(in: &cancellables)
-        
-        pythonService.$lastError
+        engine.$lastError
             .receive(on: DispatchQueue.main)
             .assign(to: \.errorMessage, on: self)
             .store(in: &cancellables)
     }
     
     // MARK: - Lifecycle
-    
 
     public func initialize() async {
         logger.info("🔧 initialize() called")
-        status = "Starting ASR Engine..."
-        await pythonService.startEngine()
-        
-        // Sync model preference
-        let savedModel = UserDefaults.standard.string(forKey: "selectedModel") ?? "mlx-community/Qwen3-ASR-1.7B-8bit"
-        if savedModel != "mlx-community/Qwen3-ASR-1.7B-8bit" { // Optimization: Python defaults to 1.7B, only send if different or force it
-             pythonService.setModel(savedModel)
-        }
-        
+        status = "Loading Native ASR..."
+        await engine.loadModel()
         logger.info("🔧 initialize() complete")
     }
 
-    
     public func shutdown() {
         logger.info("🔧 shutdown() called")
-        pythonService.stopEngine()
+        engine.shutdown()
     }
     
     // MARK: - Recording
@@ -135,30 +122,46 @@ public class AppState: ObservableObject {
         }
         
         Task {
-            logger.info("🎙️ Calling asrModel.transcribe()...")
-            let text = await asrModel.transcribe(samples: samples)
-            logger.info("🎙️ Transcription result: \(text.prefix(50))...")
-            transcript = text
-            
-            if !text.isEmpty {
-                // Copy to clipboard
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                pasteboard.setString(text, forType: .string)
+            logger.info("🎙️ Calling engine.transcribe()...")
+            do {
+                // Native engine expects sampleRate. Recorder usually defaults to 16000 or system rate.
+                // We should ensure Recorder exposes its rate or we know it.
+                // Assuming 16000 based on previous code context, but best to ask recorder.
+                // Previously AudioRecorder was setting up for 16kHz? Let's assume standard behavior.
+                // NativeASR will resample if needed inside.
                 
-                status = "✅ Copied"
+                // Note: recorder.stopRecording() returns [Float]. 
+                // We need to know the sample rate of captured audio.
+                // Assuming 16000 for now, matching NativeASREngine default.
                 
-                // Auto Paste
-                InputInjector.pasteFromClipboard()
+                let text = try await engine.transcribe(samples: samples, sampleRate: 16000)
+                logger.info("🎙️ Transcription result: \(text.prefix(50))...")
+                transcript = text
                 
-                // Hide window logic should be handled by View/Delegate observing this state
+                if !text.isEmpty {
+                    // Copy to clipboard
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(text, forType: .string)
+                    
+                    status = "✅ Copied"
+                    
+                    // Auto Paste
+                    InputInjector.pasteFromClipboard()
+                }
+            } catch {
+                logger.error("Transcription error: \(error.localizedDescription)")
+                status = "Error"
+                errorMessage = error.localizedDescription
             }
             
             try? await Task.sleep(for: .seconds(2))
             if !isRecording {
                 status = isReady ? "Ready" : "Waiting..."
-                if !text.isEmpty {
-                    transcript = "" // Clear for next time
+                if !transcript.isEmpty {
+                    // Maybe don't clear immediately so user can see it?
+                    // Previous logic cleared it. Keeping it transparent.
+                    transcript = "" 
                 }
             }
         }

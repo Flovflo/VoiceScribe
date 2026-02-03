@@ -3,16 +3,6 @@ import XCTest
 
 final class VoiceScribeTests: XCTestCase {
     
-    // MARK: - ASRModel Tests
-    
-    @MainActor
-    func testASRModelInitialization() async {
-        let service = PythonASRService()
-        let model = ASRModel(service: service)
-        let status = await model.status
-        XCTAssertEqual(status, "Idle", "ASRModel should start in Idle state")
-    }
-    
     // MARK: - AppState Tests
     
     @MainActor
@@ -58,28 +48,15 @@ final class VoiceScribeTests: XCTestCase {
         XCTAssertFalse(recorder.isRecording)
     }
     
-    // MARK: - PythonASRService Tests
+    // MARK: - NativeASREngine Tests
     
     @MainActor
-    func testPythonASRServiceInitialState() {
-        let service = PythonASRService()
+    func testNativeASREngineInitialState() {
+        let engine = NativeASREngine()
         
-        XCTAssertFalse(service.isReady, "Should not be ready before starting")
-        XCTAssertFalse(service.isModelCached, "Model should not be cached initially")
-        XCTAssertNil(service.lastError, "Should have no error initially")
-    }
-    
-    // MARK: - WAV Writing Tests
-    
-    @MainActor
-    func testWAVFileWriting() async {
-        let service = PythonASRService()
-        let _ = ASRModel(service: service)
-        
-        // Generate test samples (1 second of silence at 16kHz)
-        let samples = [Float](repeating: 0.0, count: 16000)
-        
-        XCTAssertEqual(samples.count, 16000, "Should have 1 second of samples")
+        XCTAssertFalse(engine.isReady, "Should not be ready before loading")
+        XCTAssertFalse(engine.isModelCached, "Model might be cached/uncached but default state check")
+        XCTAssertNil(engine.lastError, "Should have no error initially")
     }
     
     // MARK: - Integration Tests
@@ -100,7 +77,6 @@ final class VoiceScribeTests: XCTestCase {
         XCTAssertEqual(appState.transcript, "")
     }
 
-    
     @MainActor
     func testAppStateShutdown() {
         let appState = AppState()

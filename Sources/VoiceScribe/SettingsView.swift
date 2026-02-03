@@ -25,7 +25,7 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.radioGroup)
                     .onChange(of: selectedModel) { _, newValue in
-                        appState.pythonService.setModel(newValue)
+                        appState.engine.setModel(newValue)
                     }
                     
                     Text("1.7B is more accurate, 0.6B is faster.")

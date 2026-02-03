@@ -23,27 +23,54 @@
 | **Speed** | ⚡ Real-time | 🐢 Network latency | 🐢 Slower |
 | **Cost** | 💚 Free forever | 💸 $0.006/min+ | 💚 Free |
 | **Accuracy (WER)** | **2.8%** | ~3-5% | ~4.2% |
-| **Apple Silicon** | ✅ Native MLX | ❌ No | ⚠️ Via PyTorch |
+| **Apple Silicon** | ✅ **Native Swift + MLX** | ❌ No | ⚠️ Via PyTorch |
 | **Auto-Type** | ✅ Built-in | ❌ Copy/paste | ❌ Manual |
+| **Dependencies** | ✅ **Zero** (No Python) | ❌ Complex | ❌ Python env |
 
 ---
 
-## ⚡ Performance Benchmarks
+## ⚡ Performance
 
-Powered by **Qwen3-ASR** — State-of-the-art open-source ASR model (Jan 2025)
+Powered by **Qwen3-ASR** and Apple's **MLX** framework, running entirely natively in Swift.
 
-| Benchmark | VoiceScribe | Whisper Large v3 | Google Cloud | Azure |
-|-----------|-------------|------------------|--------------|-------|
-| **English** | **2.8% WER** | 4.2% WER | 5.1% WER | 4.8% WER |
-| **Noisy Audio** | **5.9% WER** | 8.5% WER | 7.2% WER | 7.8% WER |
-| **Multi-language** | **4.1% WER** | 6.3% WER | 5.5% WER | 5.9% WER |
-| **Speed (M3 Pro)** | **~0.3s** | ~2.1s | Network | Network |
-
-> *Lower WER = Better accuracy. Benchmarks from Alibaba Qwen3-ASR official tests, 2025.*
+- **Engine**: Pure Swift Implementation (No Python bridge)
+- **Model**: Qwen3-ASR (0.6B / 1.7B)
+- **Latnecy**: Sub-0.5s response time on M1/M2/M3 chips
+- **Memory**: Optimized tensor operations via `mlx-swift`
 
 ---
 
-## 🎯 One Shortcut. That's It.
+## 📦 Installation
+
+### 1. Requirements
+
+- **macOS 14.0+** (Sonoma or later)
+- **Apple Silicon** (M1/M2/M3/M4)
+- **Metal Toolchain** (Required for GPU shaders)
+
+### 2. Install
+
+```bash
+# 1. Clone
+git clone https://github.com/Flovflo/VoiceScribe.git
+cd VoiceScribe
+
+# 2. Build App
+./bundle_app.sh
+
+# 3. Running for the first time
+# IMPORTANT: You must install Metal Toolchain first if you haven't!
+xcodebuild -downloadComponent MetalToolchain
+
+# 4. Launch
+open VoiceScribe.app
+```
+
+> **Note**: On first launch, the app will automatically download the selected model (~1.2GB) from HuggingFace to `~/.cache/huggingface`.
+
+---
+
+## 🎯 Usage
 
 ```
 ⌥ Option + Space
@@ -54,31 +81,16 @@ Powered by **Qwen3-ASR** — State-of-the-art open-source ASR model (Jan 2025)
 3. **Press again** to stop
 4. ✨ Text types automatically at your cursor
 
-No apps to switch. No copy-paste. Just speak and type.
-
 ---
 
-## 📦 Install in 10 Seconds
-
-```bash
-brew tap Flovflo/voicescribe && brew install voicescribe
-```
-
-Or manually:
-```bash
-git clone https://github.com/Flovflo/VoiceScribe.git && cd VoiceScribe && ./install.sh
-```
-
----
-
-## 🧠 Choose Your Model
+## 🧠 Models
 
 | Model | Size | Speed | Best For |
 |-------|------|-------|----------|
 | **Qwen3-ASR-0.6B** | 600MB | ⚡⚡⚡ | Quick notes, casual use |
 | **Qwen3-ASR-1.7B** | 1.7GB | ⚡⚡ | Professional accuracy |
 
-Models download automatically on first use. Cached locally in `~/.cache/huggingface/`.
+*Switch models instantly in app settings.*
 
 ---
 
@@ -101,46 +113,22 @@ Models download automatically on first use. Cached locally in `~/.cache/huggingf
 
 ---
 
-## 💻 Requirements
+## 🛠️ Development
 
-- **macOS 14.0+** (Sonoma or later)
-- **Apple Silicon** (M1/M2/M3/M4)
-- **Python 3.11+**
+Built with:
+- **Language**: Swift 6
+- **ML Framework**: [MLX Swift](https://github.com/ml-explore/mlx-swift)
+- **Inference**: [Qwen3-ASR](https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-8bit)
+- **UI**: SwiftUI + AppKit
+
+### Build from source
 
 ```bash
-pip install mlx mlx-audio huggingface_hub
+swift build -c release
 ```
-
----
-
-## 🆚 VoiceScribe vs The Competition
-
-| | VoiceScribe | Otter.ai | Rev | Descript |
-|---|---|---|---|---|
-| **Price** | **Free** | $16.99/mo | $29.99/mo | $15/mo |
-| **Privacy** | **Local** | Cloud | Cloud | Cloud |
-| **Works Offline** | ✅ Yes | ❌ No | ❌ No | ❌ No |
-| **Auto-Type** | ✅ Yes | ❌ No | ❌ No | ❌ No |
-| **Realtime** | ✅ Yes | ⚠️ Delayed | ⚠️ Delayed | ⚠️ Delayed |
-
----
-
-## 🤝 Contributing
-
-Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) or just submit a PR.
 
 ---
 
 ## 📄 License
 
 MIT License — Use it however you want.
-
----
-
-<div align="center">
-
-**⚡ Built for speed. 🔒 Built for privacy. 🍎 Built for Apple Silicon.**
-
-[⬇️ Download Now](https://github.com/Flovflo/VoiceScribe/releases) · [🐛 Report Bug](https://github.com/Flovflo/VoiceScribe/issues) · [💡 Request Feature](https://github.com/Flovflo/VoiceScribe/issues)
-
-</div>
