@@ -1,5 +1,6 @@
 import XCTest
 @testable import VoiceScribeCore
+import MLX
 
 @MainActor
 final class AudioFeatureTests: XCTestCase {
@@ -79,7 +80,7 @@ final class AudioFeatureTests: XCTestCase {
     }
     
     func testFeatureExtraction() {
-        let extractor = AudioFeatureExtractor()
+        let extractor = AudioFeatureExtractor(backend: .cpu)
         
         // 1 second at 16kHz
         let samples = [Float](repeating: 0.3, count: 16000)
@@ -90,7 +91,7 @@ final class AudioFeatureTests: XCTestCase {
     }
     
     func testResamplingFrom48kHz() {
-        let extractor = AudioFeatureExtractor()
+        let extractor = AudioFeatureExtractor(backend: .cpu)
         
         // 1 second at 48kHz (common microphone rate)
         let samples48k = [Float](repeating: 0.2, count: 48000)
@@ -102,7 +103,7 @@ final class AudioFeatureTests: XCTestCase {
     }
     
     func testFlatFeatures() {
-        let extractor = AudioFeatureExtractor()
+        let extractor = AudioFeatureExtractor(backend: .cpu)
         
         let samples = [Float](repeating: 0.1, count: 8000) // 0.5s
         let flatFeatures = extractor.extractFlatFeatures(samples: samples, sampleRate: 16000)
@@ -114,7 +115,7 @@ final class AudioFeatureTests: XCTestCase {
     }
     
     func testFeatureShape() {
-        let extractor = AudioFeatureExtractor()
+        let extractor = AudioFeatureExtractor(backend: .cpu)
         
         let samples = [Float](repeating: 0.1, count: 16000) // 1 second
         let shape = extractor.featureShape(samples: samples, sampleRate: 16000)
@@ -126,7 +127,7 @@ final class AudioFeatureTests: XCTestCase {
     // MARK: - Normalization Tests
     
     func testAudioNormalization() {
-        let extractor = AudioFeatureExtractor()
+        let extractor = AudioFeatureExtractor(backend: .cpu)
         
         // Very quiet audio
         let quietSamples = [Float](repeating: 0.001, count: 16000)
@@ -143,7 +144,7 @@ final class AudioFeatureTests: XCTestCase {
     // MARK: - Edge Cases
     
     func testMinimalAudio() {
-        let extractor = AudioFeatureExtractor()
+        let extractor = AudioFeatureExtractor(backend: .cpu)
         
         // Just barely enough for one frame (nFFT = 400)
         let samples = [Float](repeating: 0.5, count: 400)
@@ -152,4 +153,56 @@ final class AudioFeatureTests: XCTestCase {
         XCTAssertEqual(features.count, 128)
         XCTAssertEqual(features[0].count, 1, "Should have exactly 1 frame")
     }
+
+    // MARK: - MLX GPU Tests
+
+    func testMLXFeatureExtractionShape() {
+        let extractor = AudioFeatureExtractor(backend: .mlx)
+        let samples = [Float](repeating: 0.3, count: 16000)
+
+        let mlx = extractor.extractFeaturesMLX(samples: samples, sampleRate: 16000)
+
+        XCTAssertEqual(mlx.dim(0), 1, "Batch dimension should be 1")
+        XCTAssertEqual(mlx.dim(2), 128, "Should have 128 mel bins")
+        XCTAssertGreaterThan(mlx.dim(1), 0, "Should have frames")
+    }
+
+    func testMLXvsAccelerateParity() {
+        let cpuExtractor = AudioFeatureExtractor(backend: .cpu)
+        let mlxExtractor = AudioFeatureExtractor(backend: .mlx)
+
+        let samples = [Float](repeating: 0.2, count: 16000)
+
+        let cpuFeatures = cpuExtractor.extractFeatures(samples: samples, sampleRate: 16000)
+        let mlx = mlxExtractor.extractFeaturesMLX(samples: samples, sampleRate: 16000)
+
+        let mlxFlat = mlx.squeezed(axis: 0).asArray(Float.self)
+        let cpuTransposed = transpose(cpuFeatures)
+
+        let cpuFlat = cpuTransposed.flatMap { $0 }
+        XCTAssertEqual(cpuFlat.count, mlxFlat.count)
+
+        var maxDiff: Float = 0
+        for i in 0..<min(cpuFlat.count, mlxFlat.count) {
+            let diff = abs(cpuFlat[i] - mlxFlat[i])
+            if diff > maxDiff { maxDiff = diff }
+        }
+
+        XCTAssertLessThan(maxDiff, 5e-2, "CPU and MLX features should be close")
+    }
+}
+
+// MARK: - Helpers
+
+private func transpose(_ matrix: [[Float]]) -> [[Float]] {
+    guard let first = matrix.first else { return [] }
+    let rows = matrix.count
+    let cols = first.count
+    var result = [[Float]](repeating: [Float](repeating: 0, count: rows), count: cols)
+    for r in 0..<rows {
+        for c in 0..<cols {
+            result[c][r] = matrix[r][c]
+        }
+    }
+    return result
 }

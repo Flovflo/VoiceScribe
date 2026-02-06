@@ -48,11 +48,11 @@ final class VoiceScribeTests: XCTestCase {
         XCTAssertFalse(recorder.isRecording)
     }
     
-    // MARK: - NativeASREngine Tests
+    // MARK: - NativeASRService Tests
     
     @MainActor
-    func testNativeASREngineInitialState() {
-        let engine = NativeASREngine()
+    func testNativeASRServiceInitialState() {
+        let engine = NativeASRService()
         
         XCTAssertFalse(engine.isReady, "Should not be ready before loading")
         XCTAssertFalse(engine.isModelCached, "Model might be cached/uncached but default state check")

@@ -21,7 +21,7 @@ public class AppState: ObservableObject {
     
     // MARK: - Services
     public let recorder = AudioRecorder()
-    public let engine = NativeASREngine()
+    public let engine = NativeASRService()
     
     private var cancellables = Set<AnyCancellable>()
     

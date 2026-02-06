@@ -27,9 +27,6 @@ class Voicescribe < Formula
         open #{opt_prefix}/VoiceScribe.app
         # Or find it in Launchpad!
 
-      REQUIRED - Install Python dependencies:
-        pip3 install git+https://github.com/Blaizzy/mlx-audio.git
-
       PERMISSIONS:
         Grant Accessibility & Microphone access when prompted.
 

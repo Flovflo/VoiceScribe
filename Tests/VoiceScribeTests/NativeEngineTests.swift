@@ -1,42 +1,71 @@
 import XCTest
+import Foundation
 @testable import VoiceScribeCore
-import MLX
-import MLXNN
 
-@MainActor
 final class NativeEngineTests: XCTestCase {
-    
+
     func testModelLoadingAndBasicInference() async throws {
-        // 1. Setup Engine
+        guard ProcessInfo.processInfo.environment["VOICESCRIBE_RUN_ASR_TESTS"] == "1" else {
+            throw XCTSkip("Set VOICESCRIBE_RUN_ASR_TESTS=1 to run ASR integration tests.")
+        }
+
         let engine = NativeASREngine()
-        
-        // 2. Load Model
+
         print("🚀 Starting Model Load...")
-        await engine.loadModel()
-        
-        XCTAssertTrue(engine.isReady, "Engine should be ready after loading")
-        XCTAssertNil(engine.lastError, "Engine should not have errors")
-        
-        // 3. Generate Synthetic Audio (1 sec sine wave at 16kHz)
-        // 440Hz sine wave
+        try await engine.loadModel()
+
+        // Generate synthetic audio (1 sec sine wave at 16kHz)
         let sampleRate = 16000
         let duration = 1.0
         let samples = (0..<Int(Double(sampleRate) * duration)).map { i -> Float in
             let t = Double(i) / Double(sampleRate)
             return Float(sin(2 * .pi * 440.0 * t))
         }
-        
-        // 4. Transcribe
+
         print("🎙️ Starting Transcription...")
-        do {
-            let result = try await engine.transcribe(samples: samples, sampleRate: sampleRate)
-            print("✅ Evaluation Result: \(result)")
-            
-            // We don't expect accurate transcription of a sine wave, but we expect it NOT to crash and return consistent string.
-            // Qwen3-ASR might output garbage or nothing for sine wave, but the function should complete.
-            XCTAssertNotNil(result)
-        } catch {
-            XCTFail("Transcription failed with error: \(error)")
+        let result = try await engine.transcribe(samples: samples, sampleRate: sampleRate)
+        XCTAssertNotNil(result as String?)
+    }
+
+    func testTranscriptionWithSampleAudio() async throws {
+        guard ProcessInfo.processInfo.environment["VOICESCRIBE_RUN_ASR_TESTS"] == "1" else {
+            throw XCTSkip("Set VOICESCRIBE_RUN_ASR_TESTS=1 to run ASR integration tests.")
         }
+
+        guard let audioPath = ProcessInfo.processInfo.environment["VOICESCRIBE_TEST_AUDIO"] else {
+            throw XCTSkip("Set VOICESCRIBE_TEST_AUDIO to a WAV file to run sample transcription.")
+        }
+
+        let engine = NativeASREngine()
+        try await engine.loadModel()
+
+        let url = URL(fileURLWithPath: audioPath)
+        let text = try await engine.transcribe(from: url)
+        XCTAssertFalse(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    func testASRBenchmark() async throws {
+        guard ProcessInfo.processInfo.environment["VOICESCRIBE_RUN_ASR_BENCH"] == "1" else {
+            throw XCTSkip("Set VOICESCRIBE_RUN_ASR_BENCH=1 to run ASR benchmarks.")
+        }
+
+        let engine = NativeASREngine()
+        try await engine.loadModel()
+
+        let sampleRate = 16000
+        let duration = 10.0
+        let samples = (0..<Int(Double(sampleRate) * duration)).map { i -> Float in
+            let t = Double(i) / Double(sampleRate)
+            return Float(sin(2 * .pi * 220.0 * t))
+        }
+
+        let clock = ContinuousClock()
+        let start = clock.now
+        _ = try? await engine.transcribe(samples: samples, sampleRate: sampleRate)
+        let elapsed = clock.now - start
+
+        let elapsedMs = Double(elapsed.components.seconds) * 1000.0
+            + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000.0
+        XCTAssertLessThan(elapsedMs, 500.0)
     }
 }

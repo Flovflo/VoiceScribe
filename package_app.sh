@@ -20,7 +20,6 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 echo "📋 Copying Artifacts..."
 cp ".build/arm64-apple-macosx/release/$BINARY_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
-cp "backend/transcribe_daemon.py" "$APP_BUNDLE/Contents/Resources/"
 
 echo "🎨 Processing Icon..."
 if [ -f "$ICON_SOURCE" ]; then
@@ -81,4 +80,3 @@ echo "✍️ Signing Bundle..."
 codesign --force --deep --sign - "$APP_BUNDLE"
 
 echo "✅ App Packaged: $APP_BUNDLE"
-
