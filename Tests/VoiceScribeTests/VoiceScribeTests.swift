@@ -60,6 +60,24 @@ final class VoiceScribeTests: XCTestCase {
         XCTAssertFalse(engine.isModelCached, "Model might be cached/uncached but default state check")
         XCTAssertNil(engine.lastError, "Should have no error initially")
     }
+
+    func testPermissionBridgeHandlesBackgroundCallback() async {
+        let granted = await AudioRecorder.bridgePermissionRequest { completion in
+            DispatchQueue.global(qos: .userInitiated).async {
+                completion(true)
+            }
+        }
+        XCTAssertTrue(granted)
+    }
+
+    func testPermissionBridgeCanReturnFalse() async {
+        let granted = await AudioRecorder.bridgePermissionRequest { completion in
+            DispatchQueue.global(qos: .utility).async {
+                completion(false)
+            }
+        }
+        XCTAssertFalse(granted)
+    }
     
     // MARK: - Integration Tests
     

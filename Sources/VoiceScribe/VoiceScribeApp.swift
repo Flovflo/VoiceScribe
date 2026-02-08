@@ -56,7 +56,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Register Option+Space
         HotKeyManager.shared.register(keyCode: 49, modifiers: 2048)
         HotKeyManager.shared.onTrigger = { [weak self] in
-            self?.toggleApp()
+            Task { @MainActor [weak self] in
+                self?.toggleApp()
+            }
         }
 
         // Wait for SwiftUI WindowGroup window, then attach HUD behavior to it.

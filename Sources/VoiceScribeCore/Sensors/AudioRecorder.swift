@@ -187,10 +187,15 @@ public class AudioRecorder: ObservableObject {
     }
     
     public func requestPermission() async -> Bool {
-        return await withCheckedContinuation { continuation in
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
-                continuation.resume(returning: granted)
-            }
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return true
+        case .denied, .restricted:
+            return false
+        case .notDetermined:
+            return await Self.bridgePermissionRequest(Self.systemRequestMicrophonePermission)
+        @unknown default:
+            return false
         }
     }
     
@@ -346,6 +351,22 @@ public class AudioRecorder: ObservableObject {
         }
 
         return nil
+    }
+
+    nonisolated static func bridgePermissionRequest(
+        _ request: @escaping @Sendable (@escaping @Sendable (Bool) -> Void) -> Void
+    ) async -> Bool {
+        await withCheckedContinuation { continuation in
+            request { granted in
+                continuation.resume(returning: granted)
+            }
+        }
+    }
+
+    nonisolated private static func systemRequestMicrophonePermission(
+        _ completion: @escaping @Sendable (Bool) -> Void
+    ) {
+        AVCaptureDevice.requestAccess(for: .audio, completionHandler: completion)
     }
 
     nonisolated private static func deviceUID(for deviceID: AudioDeviceID) -> String? {
