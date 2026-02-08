@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 APP_NAME="VoiceScribe"
 APP_BUNDLE="${APP_NAME}.app"
@@ -8,6 +8,12 @@ SRC_ROOT=$(pwd)
 ICON_SOURCE="AppIcon.png"
 ICONSET_DIR="VoiceScribe.iconset"
 MLX_METALLIB_NAME="default.metallib"
+VERSION="${VOICESCRIBE_VERSION:-1.3.0}"
+BUILD_NUMBER="${VOICESCRIBE_BUILD:-1}"
+BUNDLE_ID="${VOICESCRIBE_BUNDLE_ID:-com.voicescribe.app}"
+MIN_MACOS_VERSION="${VOICESCRIBE_MIN_MACOS_VERSION:-14.0}"
+SKIP_BUILD="${VOICESCRIBE_SKIP_BUILD:-0}"
+SIGN_IDENTITY="${VOICESCRIBE_CODESIGN_IDENTITY:--}"
 
 find_mlx_metallib_source() {
     local candidates=()
@@ -36,8 +42,10 @@ find_mlx_metallib_source() {
 # Cleanup
 rm -rf "$APP_BUNDLE" "$ICONSET_DIR"
 
-echo "🚀 Building Release..."
-swift build -c release --arch arm64
+if [ "$SKIP_BUILD" != "1" ]; then
+    echo "🚀 Building Release..."
+    swift build -c release --arch arm64
+fi
 
 echo "📦 Creating Bundle Structure..."
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
@@ -97,7 +105,7 @@ cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
     <key>CFBundleExecutable</key>
     <string>$APP_NAME</string>
     <key>CFBundleIdentifier</key>
-    <string>com.voicescribe.app</string>
+    <string>$BUNDLE_ID</string>
     <key>CFBundleName</key>
     <string>$APP_NAME</string>
     <key>CFBundleIconFile</key>
@@ -107,9 +115,11 @@ cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.2.0</string>
+    <string>$VERSION</string>
     <key>CFBundleVersion</key>
-    <string>3</string>
+    <string>$BUILD_NUMBER</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>$MIN_MACOS_VERSION</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
@@ -121,6 +131,6 @@ cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
 EOF
 
 echo "✍️ Signing Bundle..."
-codesign --force --deep --sign - "$APP_BUNDLE"
+codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
 
 echo "✅ App Packaged: $APP_BUNDLE"

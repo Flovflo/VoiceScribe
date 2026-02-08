@@ -52,6 +52,10 @@ public final class NativeASRService: ObservableObject {
         }
     }
 
+    public func setModelAndWait(_ name: String) async {
+        await engine.setModel(name)
+    }
+
     public func shutdown() {
         Task {
             await engine.shutdown()

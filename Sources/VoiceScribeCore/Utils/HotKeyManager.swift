@@ -90,21 +90,23 @@ public class HotKeyManager {
             EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))
         ]
         
-        status = InstallEventHandler(
-            GetApplicationEventTarget(),
-            { _, event, _ -> OSStatus in
-                guard let event else { return noErr }
-                let kind = GetEventKind(event)
-                DispatchQueue.main.async {
-                    HotKeyManager.shared.handleHotKeyEvent(kind: kind)
-                }
-                return noErr
-            },
-            eventTypes.count,
-            &eventTypes,
-            nil,
-            &eventHandler
-        )
+        status = eventTypes.withUnsafeMutableBufferPointer { buffer in
+            InstallEventHandler(
+                GetApplicationEventTarget(),
+                { _, event, _ -> OSStatus in
+                    guard let event else { return noErr }
+                    let kind = GetEventKind(event)
+                    Task { @MainActor in
+                        HotKeyManager.shared.handleHotKeyEvent(kind: kind)
+                    }
+                    return noErr
+                },
+                buffer.count,
+                buffer.baseAddress,
+                nil,
+                &eventHandler
+            )
+        }
         
         if status != noErr {
             logger.error("Failed to install event handler: \(status)")

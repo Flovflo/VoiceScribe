@@ -110,4 +110,13 @@ final class VoiceScribeTests: XCTestCase {
         XCTAssertTrue(state.shouldTrigger(for: UInt32(kEventHotKeyPressed), now: 1.7))
         XCTAssertFalse(state.shouldTrigger(for: UInt32(kEventHotKeyPressed), now: 2.0))
     }
+
+    func testASRModelCatalogSupportsAllQwen3ASRVariantsOnly() {
+        XCTAssertTrue(ASRModelCatalog.isSupportedASRModel("mlx-community/Qwen3-ASR-0.6B-4bit"))
+        XCTAssertTrue(ASRModelCatalog.isSupportedASRModel("mlx-community/Qwen3-ASR-0.6B-8bit"))
+        XCTAssertTrue(ASRModelCatalog.isSupportedASRModel("mlx-community/Qwen3-ASR-1.7B-8bit"))
+        XCTAssertTrue(ASRModelCatalog.isSupportedASRModel("mlx-community/Qwen3-ASR-1.7B-bf16"))
+        XCTAssertFalse(ASRModelCatalog.isSupportedASRModel("mlx-community/Qwen3-ForcedAligner-0.6B-8bit"))
+        XCTAssertFalse(ASRModelCatalog.isSupportedASRModel("mlx-community/Llama-3.2-1B-Instruct-4bit"))
+    }
 }

@@ -14,10 +14,13 @@ public class AppState: ObservableObject {
     @Published public var status: String = "Initializing..."
     @Published public var audioLevel: Float = 0.0
     @Published public var isRecording: Bool = false
+    @Published public private(set) var isStartingRecording: Bool = false
     @Published public var isReady: Bool = false
     @Published public var isModelDownloading: Bool = false
     @Published public var downloadProgress: Double = 0.0
     @Published public var errorMessage: String?
+    @Published public var availableInputDevices: [AudioInputDevice] = []
+    @Published public var selectedInputDeviceUID: String?
     
     // MARK: - Services
     public let recorder = AudioRecorder()
@@ -25,6 +28,7 @@ public class AppState: ObservableObject {
     
     private var cancellables = Set<AnyCancellable>()
     private var isInitializing = false
+    private var stopRequestedWhileStarting = false
     
     public init() {
         logger.info("🔧 AppState init")
@@ -36,6 +40,16 @@ public class AppState: ObservableObject {
         recorder.$audioLevel
             .receive(on: DispatchQueue.main)
             .assign(to: \.audioLevel, on: self)
+            .store(in: &cancellables)
+
+        recorder.$availableInputDevices
+            .receive(on: DispatchQueue.main)
+            .assign(to: \.availableInputDevices, on: self)
+            .store(in: &cancellables)
+
+        recorder.$selectedInputDeviceUID
+            .receive(on: DispatchQueue.main)
+            .assign(to: \.selectedInputDeviceUID, on: self)
             .store(in: &cancellables)
         
         engine.$status
@@ -73,7 +87,13 @@ public class AppState: ObservableObject {
 
         logger.info("🔧 initialize() called")
         status = "Loading Native ASR..."
-        await engine.loadModel()
+        let selectedModel = UserDefaults.standard.string(forKey: "selectedModel")
+            ?? ASRModelCatalog.defaultModelID
+        if selectedModel == ASRModelCatalog.defaultModelID {
+            await engine.loadModel()
+        } else {
+            await engine.setModelAndWait(selectedModel)
+        }
         if !isReady, let lastError = engine.lastError {
             status = "Model Error"
             errorMessage = lastError
@@ -93,6 +113,9 @@ public class AppState: ObservableObject {
         
         if isRecording {
             stopRecordingAndTranscribe()
+        } else if isStartingRecording {
+            // User pressed hotkey again while start is in-flight.
+            stopRequestedWhileStarting = true
         } else {
             startRecording()
         }
@@ -100,8 +123,12 @@ public class AppState: ObservableObject {
     
     private func startRecording() {
         logger.info("🎙️ startRecording() called")
+        guard !isStartingRecording else { return }
+        isStartingRecording = true
+        stopRequestedWhileStarting = false
         
         Task {
+            defer { isStartingRecording = false }
             do {
                 logger.info("🎙️ Calling recorder.startRecording()...")
                 try await recorder.startRecording()
@@ -109,10 +136,16 @@ public class AppState: ObservableObject {
                 isRecording = true
                 status = "🎤 Recording..."
                 errorMessage = nil
+
+                if stopRequestedWhileStarting {
+                    stopRequestedWhileStarting = false
+                    stopRecordingAndTranscribe()
+                }
             } catch {
                 logger.error("🎙️ recorder.startRecording() FAILED: \(error.localizedDescription)")
                 status = "Microphone Error"
                 errorMessage = error.localizedDescription
+                stopRequestedWhileStarting = false
             }
         }
     }
@@ -173,5 +206,13 @@ public class AppState: ObservableObject {
     
     public func clearTranscript() {
         transcript = ""
+    }
+
+    public func refreshInputDevices() {
+        recorder.refreshInputDevices()
+    }
+
+    public func setPreferredInputDevice(uid: String?) {
+        recorder.setSelectedInputDevice(uid: uid)
     }
 }

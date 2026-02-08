@@ -1,5 +1,6 @@
 import Foundation
 @preconcurrency import AVFoundation
+import CoreAudio
 import os.log
 
 private let logger = Logger(subsystem: "com.voicescribe", category: "AudioRecorder")
@@ -21,6 +22,16 @@ public enum AudioRecorderError: Error, LocalizedError {
     }
 }
 
+public struct AudioInputDevice: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
 /// Non-isolated audio capture engine
 /// This class is NOT MainActor and handles all audio thread callbacks safely
 final class AudioCaptureEngine: @unchecked Sendable {
@@ -30,11 +41,24 @@ final class AudioCaptureEngine: @unchecked Sendable {
     private(set) var sampleRate: Double = 48000
     private(set) var lastRMS: Float = 0
     private(set) var isCapturing = false
+    private var previousDefaultInputDeviceID: AudioDeviceID?
     
-    func start() throws {
+    func start(preferredDeviceID: AudioDeviceID?) throws {
         lock.lock()
         samples.removeAll()
         lock.unlock()
+
+        if let preferredDeviceID {
+            let currentDefault = Self.defaultInputDeviceID()
+            if currentDefault != preferredDeviceID {
+                guard Self.setDefaultInputDevice(preferredDeviceID) else {
+                    throw AudioRecorderError.engineSetupFailed("Failed to switch to selected microphone")
+                }
+                previousDefaultInputDeviceID = currentDefault
+            }
+        } else {
+            previousDefaultInputDeviceID = nil
+        }
         
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
@@ -51,7 +75,13 @@ final class AudioCaptureEngine: @unchecked Sendable {
             self?.handleBuffer(buffer)
         }
         
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            inputNode.removeTap(onBus: 0)
+            self.engine = nil
+            throw AudioRecorderError.engineStartFailed(error)
+        }
         isCapturing = true
     }
     
@@ -80,6 +110,11 @@ final class AudioCaptureEngine: @unchecked Sendable {
             engine.stop()
         }
         engine = nil
+
+        if let previousDefaultInputDeviceID {
+            _ = Self.setDefaultInputDevice(previousDefaultInputDeviceID)
+            self.previousDefaultInputDeviceID = nil
+        }
         
         lock.lock()
         let result = samples
@@ -88,20 +123,66 @@ final class AudioCaptureEngine: @unchecked Sendable {
         
         return result
     }
+
+    private static func defaultInputDeviceID() -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var deviceID = AudioDeviceID(0)
+        var dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &deviceID
+        )
+        guard status == noErr else { return nil }
+        return deviceID
+    }
+
+    private static func setDefaultInputDevice(_ deviceID: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var mutableDeviceID = deviceID
+        let dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            dataSize,
+            &mutableDeviceID
+        )
+        return status == noErr
+    }
 }
 
 @MainActor
 public class AudioRecorder: ObservableObject {
+    private static let selectedInputDeviceDefaultsKey = "selectedInputDeviceUID"
+
     private let captureEngine = AudioCaptureEngine()
     private var levelTimer: Timer?
     
     @Published public var isRecording = false
     @Published public var audioLevel: Float = 0.0
+    @Published public private(set) var availableInputDevices: [AudioInputDevice] = []
+    @Published public private(set) var selectedInputDeviceUID: String?
     
     private let targetSampleRate: Double = 16000
     public var outputSampleRate: Int { Int(targetSampleRate) }
     
     public init() {
+        selectedInputDeviceUID = UserDefaults.standard.string(forKey: Self.selectedInputDeviceDefaultsKey)
+        refreshInputDevices()
         logger.info("AudioRecorder initialized")
     }
     
@@ -122,8 +203,14 @@ public class AudioRecorder: ObservableObject {
         }
         
         logger.info("Starting recording...")
-        
-        try captureEngine.start()
+
+        let preferredDeviceID = selectedInputDeviceUID.flatMap(Self.audioDeviceID(forUID:))
+        if selectedInputDeviceUID != nil && preferredDeviceID == nil {
+            refreshInputDevices()
+            throw AudioRecorderError.engineSetupFailed("Selected microphone is unavailable")
+        }
+
+        try captureEngine.start(preferredDeviceID: preferredDeviceID)
         isRecording = true
         
         // Poll audio level on main thread
@@ -198,5 +285,79 @@ public class AudioRecorder: ObservableObject {
         
         logger.info("Resampled \(inputSamples.count) -> \(outputSamples.count) (CoreAudio High Quality)")
         return outputSamples
+    }
+
+    public func refreshInputDevices() {
+        let devices = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.microphone, .external],
+            mediaType: .audio,
+            position: .unspecified
+        ).devices
+            .sorted { $0.localizedName.localizedCaseInsensitiveCompare($1.localizedName) == .orderedAscending }
+            .map { AudioInputDevice(id: $0.uniqueID, name: $0.localizedName) }
+
+        availableInputDevices = devices
+
+        if let selectedInputDeviceUID,
+           !devices.contains(where: { $0.id == selectedInputDeviceUID }) {
+            self.selectedInputDeviceUID = nil
+            UserDefaults.standard.removeObject(forKey: Self.selectedInputDeviceDefaultsKey)
+        }
+    }
+
+    public func setSelectedInputDevice(uid: String?) {
+        if let uid, !uid.isEmpty {
+            selectedInputDeviceUID = uid
+            UserDefaults.standard.set(uid, forKey: Self.selectedInputDeviceDefaultsKey)
+        } else {
+            selectedInputDeviceUID = nil
+            UserDefaults.standard.removeObject(forKey: Self.selectedInputDeviceDefaultsKey)
+        }
+    }
+
+    private static func audioDeviceID(forUID uid: String) -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var dataSize: UInt32 = 0
+        let systemObject = AudioObjectID(kAudioObjectSystemObject)
+        guard AudioObjectGetPropertyDataSize(systemObject, &address, 0, nil, &dataSize) == noErr else {
+            return nil
+        }
+
+        let count = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
+        var devices = Array<AudioDeviceID>(repeating: 0, count: count)
+        guard AudioObjectGetPropertyData(systemObject, &address, 0, nil, &dataSize, &devices) == noErr else {
+            return nil
+        }
+
+        for deviceID in devices {
+            if deviceUID(for: deviceID) == uid {
+                return deviceID
+            }
+        }
+
+        return nil
+    }
+
+    private static func deviceUID(for deviceID: AudioDeviceID) -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var uid: CFString?
+        var dataSize = UInt32(MemoryLayout<CFString?>.size)
+        let status = withUnsafeMutablePointer(to: &uid) { pointer in
+            AudioObjectGetPropertyData(deviceID, &address, 0, nil, &dataSize, pointer)
+        }
+        guard status == noErr else {
+            return nil
+        }
+        return uid as String?
     }
 }

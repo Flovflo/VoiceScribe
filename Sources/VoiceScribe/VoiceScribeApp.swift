@@ -224,10 +224,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard let window = attachMainWindowIfNeeded() else { return }
         collapseDuplicateHUDWindows(keeping: window)
+        let appState = AppState.shared
+        let recordingActive = appState.isRecording || appState.isStartingRecording
 
         if window.isVisible {
-            if AppState.shared.isRecording {
-                AppState.shared.toggleRecording()
+            if recordingActive {
+                appState.toggleRecording()
             } else {
                 window.orderOut(nil)
             }
@@ -240,8 +242,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
-            if !AppState.shared.isRecording {
-                AppState.shared.toggleRecording()
+            if !recordingActive {
+                appState.toggleRecording()
             }
         }
     }
@@ -250,7 +252,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if settingsWindow == nil {
             let contentView = NSHostingView(rootView: SettingsView())
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 400, height: 320),
+                contentRect: NSRect(x: 0, y: 0, width: 520, height: 480),
                 styleMask: [.titled, .closable, .fullSizeContentView],
                 backing: .buffered, defer: false)
             window.center()

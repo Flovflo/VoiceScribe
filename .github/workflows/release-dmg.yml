@@ -1,0 +1,60 @@
+name: Release DMG
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to package (e.g. v1.3.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag/version
+        id: vars
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build DMG
+        shell: bash
+        run: |
+          ./scripts/build_dmg.sh "${{ steps.vars.outputs.tag }}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoiceScribe-${{ steps.vars.outputs.version }}-dmg
+          path: |
+            dist/VoiceScribe-${{ steps.vars.outputs.version }}.dmg
+            dist/VoiceScribe-${{ steps.vars.outputs.version }}.dmg.sha256
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          files: |
+            dist/VoiceScribe-${{ steps.vars.outputs.version }}.dmg
+            dist/VoiceScribe-${{ steps.vars.outputs.version }}.dmg.sha256
+          fail_on_unmatched_files: true

@@ -30,6 +30,19 @@ Ce document decrit la migration et les garde-fous qualite pour la version native
   - contraste texte fort
   - suppression des effets provoquant l'impression de halo noir
 
+## Nouveaux reglages avances
+
+- **Selection modele Qwen3-ASR complete**
+  - Toutes les variantes `Qwen3-ASR` de la collection sont selectionnables en mode avance:
+    - `0.6B`: `4bit`, `5bit`, `6bit`, `8bit`, `bf16`
+    - `1.7B`: `4bit`, `5bit`, `6bit`, `8bit`, `bf16`
+  - Les variantes `Qwen3-ForcedAligner` sont volontairement exclues (pas un modele de transcription texte direct).
+
+- **Selection micro par defaut (persistante)**
+  - Le micro choisi dans les settings est memorise.
+  - A chaque enregistrement, VoiceScribe reapplique ce micro explicitement.
+  - Si le micro n'est plus disponible, l'app remonte une erreur claire au lieu de basculer silencieusement.
+
 ## Validation qualite executee
 
 Build:

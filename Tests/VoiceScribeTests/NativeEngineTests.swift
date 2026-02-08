@@ -16,16 +16,16 @@ final class NativeEngineTests: XCTestCase {
         }
     }
 
-    func testRejectsQwen3ASRWrongVariant() async throws {
+    func testRejectsForcedAlignerVariant() async throws {
         let engine = NativeASREngine(
-            config: .init(modelName: "mlx-community/Qwen3-ASR-0.6B-8bit")
+            config: .init(modelName: "mlx-community/Qwen3-ForcedAligner-0.6B-8bit")
         )
 
         do {
             try await engine.loadModel()
             XCTFail("Expected unsupported model error")
         } catch ASRError.unsupportedModel(let modelName) {
-            XCTAssertEqual(modelName, "mlx-community/Qwen3-ASR-0.6B-8bit")
+            XCTAssertEqual(modelName, "mlx-community/Qwen3-ForcedAligner-0.6B-8bit")
         }
     }
 

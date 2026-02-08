@@ -4,16 +4,13 @@ import VoiceScribeCore
 struct OnboardingView: View {
     @ObservedObject var appState = AppState.shared
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
-    @AppStorage("selectedModel") private var selectedModel = "mlx-community/Qwen3-ASR-1.7B-8bit"
+    @AppStorage("selectedModel") private var selectedModel = ASRModelCatalog.defaultModelID
     
     @State private var currentStep = 0
     @State private var isDownloading = false
     @State private var downloadComplete = false
     
-    let models = [
-        ("Fast", "0.6B", "Quick transcription", "mlx-community/Qwen3-ASR-0.6B-8bit"),
-        ("Accurate", "1.7B", "Better accuracy", "mlx-community/Qwen3-ASR-1.7B-8bit")
-    ]
+    private let models = ASRModelCatalog.quickChoices
     
     var body: some View {
         ZStack {
@@ -49,6 +46,9 @@ struct OnboardingView: View {
                 .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
         )
         .onAppear {
+            if !ASRModelCatalog.isSupportedASRModel(selectedModel) {
+                selectedModel = ASRModelCatalog.defaultModelID
+            }
             // Start engine in background
             Task {
                 await appState.initialize()
@@ -114,13 +114,11 @@ struct OnboardingView: View {
             
             // Model options
             VStack(spacing: 12) {
-                ForEach(models, id: \.3) { model in
+                ForEach(models, id: \.id) { model in
                     modelRow(
-                        title: model.0,
-                        size: model.1,
-                        desc: model.2,
-                        id: model.3,
-                        isSelected: selectedModel == model.3
+                        model: model,
+                        description: model.id.contains("1.7B") ? "Best quality for dictation" : "Lower memory, faster startup",
+                        isSelected: selectedModel == model.id
                     )
                 }
             }
@@ -378,16 +376,16 @@ struct OnboardingView: View {
         }
     }
     
-    private func modelRow(title: String, size: String, desc: String, id: String, isSelected: Bool) -> some View {
-        Button(action: { selectedModel = id }) {
+    private func modelRow(model: ASRModelOption, description: String, isSelected: Bool) -> some View {
+        Button(action: { selectedModel = model.id }) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
-                        Text(title)
+                        Text(model.title.replacingOccurrences(of: "Qwen3-ASR ", with: ""))
                             .font(.system(size: 14, weight: .medium))
                             .foregroundColor(.white)
                         
-                        Text(size)
+                        Text(model.quantization.uppercased())
                             .font(.system(size: 11))
                             .foregroundColor(.white.opacity(0.3))
                             .padding(.horizontal, 6)
@@ -398,7 +396,7 @@ struct OnboardingView: View {
                             )
                     }
                     
-                    Text(desc)
+                    Text(description)
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.35))
                 }

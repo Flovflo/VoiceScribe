@@ -48,7 +48,15 @@ Powered by **Qwen3-ASR** and Apple's **MLX** framework, running entirely nativel
 - **Apple Silicon** (M1/M2/M3/M4)
 - **Metal Toolchain** (Required for GPU shaders)
 
-### 2. Install
+### 2. Install (Recommended)
+
+Download the latest `.dmg` from GitHub Releases:
+
+- [https://github.com/Flovflo/VoiceScribe/releases](https://github.com/Flovflo/VoiceScribe/releases)
+
+Open the DMG and drag `VoiceScribe.app` into `Applications`.
+
+### 3. Build from source (Alternative)
 
 ```bash
 # 1. Clone
@@ -67,6 +75,16 @@ open VoiceScribe.app
 ```
 
 > **Note**: On first launch, the app will automatically download the selected model (~1.2GB) from HuggingFace to `~/.cache/huggingface`.
+
+### Maintainer Release Command (DMG)
+
+```bash
+./scripts/build_dmg.sh v1.3.0
+```
+
+This generates:
+- `dist/VoiceScribe-1.3.0.dmg`
+- `dist/VoiceScribe-1.3.0.dmg.sha256`
 
 ---
 
@@ -91,6 +109,12 @@ open VoiceScribe.app
 | **Qwen3-ASR-1.7B** | 1.7GB | ⚡⚡ | Professional accuracy |
 
 *Switch models instantly in app settings.*
+
+## ⚙️ Advanced Settings
+
+- Select any supported `Qwen3-ASR` variant (0.6B/1.7B, 4bit/5bit/6bit/8bit/bf16)
+- Persist a default microphone so VoiceScribe reuses the same input every time
+- ForceAligner variants are intentionally excluded from transcription selection
 
 ---
 

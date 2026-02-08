@@ -8,7 +8,7 @@ import os.log
 /// Native ASR Engine using MLX-Swift for on-device transcription.
 /// Uses pre-converted models from mlx-community/Qwen3-ASR.
 public actor NativeASREngine {
-    private static let requiredModelID = "mlx-community/Qwen3-ASR-1.7B-8bit"
+    private static let requiredModelID = ASRModelCatalog.defaultModelID
 
     public enum Event: Sendable {
         case status(String)
@@ -412,7 +412,7 @@ public actor NativeASREngine {
     }
 
     private static func isAllowedModel(_ name: String) -> Bool {
-        name == requiredModelID
+        ASRModelCatalog.isSupportedASRModel(name)
     }
 
     private static func ensureTokenizerJSONIfNeeded(in modelDir: URL) throws {
@@ -634,7 +634,7 @@ extension ASRError: LocalizedError {
         case .emptyTranscriptionRaw(let raw):
             return "No speech detected (raw model output: \(raw))"
         case .unsupportedModel(let model):
-            return "Unsupported model '\(model)'. Required: mlx-community/Qwen3-ASR-1.7B-8bit"
+            return "Unsupported model '\(model)'. Select one of the Qwen3-ASR variants in Settings > Advanced."
         case .modelLoadFailed(let reason):
             return "Model load failed: \(reason)"
         }

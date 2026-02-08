@@ -2,6 +2,7 @@
 .build/
 VoiceScribe.app/
 VoiceScribe-v*.tar.gz
+dist/
 facts
 *.xcodeproj
 xcuserdata/
