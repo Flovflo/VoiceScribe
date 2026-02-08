@@ -86,6 +86,14 @@ This generates:
 - `dist/VoiceScribe-1.3.0.dmg`
 - `dist/VoiceScribe-1.3.0.dmg.sha256`
 
+### Maintainer Icon Command (Liquid Glass)
+
+```bash
+swift scripts/generate_liquid_glass_icon.swift AppIcon.png
+```
+
+Then re-run `./scripts/build_dmg.sh <tag>` to package with the updated icon.
+
 ---
 
 ## 🎯 Usage

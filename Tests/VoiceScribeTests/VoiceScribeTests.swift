@@ -111,6 +111,22 @@ final class VoiceScribeTests: XCTestCase {
         XCTAssertFalse(state.shouldTrigger(for: UInt32(kEventHotKeyPressed), now: 2.0))
     }
 
+    @MainActor
+    func testHotKeyManagerHandlesPressReleaseStorm() {
+        let manager = HotKeyManager.shared
+        var triggerCount = 0
+        manager.onTrigger = { triggerCount += 1 }
+
+        for cycle in 0..<240 {
+            let now = Double(cycle) * 0.01
+            manager.__test_handleHotKeyEvent(kind: UInt32(kEventHotKeyPressed), now: now)
+            manager.__test_handleHotKeyEvent(kind: UInt32(kEventHotKeyPressed), now: now + 0.001)
+            manager.__test_handleHotKeyEvent(kind: UInt32(kEventHotKeyReleased), now: now + 0.002)
+        }
+
+        XCTAssertGreaterThan(triggerCount, 0)
+    }
+
     func testASRModelCatalogSupportsAllQwen3ASRVariantsOnly() {
         XCTAssertTrue(ASRModelCatalog.isSupportedASRModel("mlx-community/Qwen3-ASR-0.6B-4bit"))
         XCTAssertTrue(ASRModelCatalog.isSupportedASRModel("mlx-community/Qwen3-ASR-0.6B-8bit"))

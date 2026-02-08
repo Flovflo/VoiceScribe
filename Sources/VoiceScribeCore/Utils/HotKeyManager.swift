@@ -51,8 +51,7 @@ struct HotKeyPressState {
     }
 }
 
-@MainActor
-public class HotKeyManager {
+public final class HotKeyManager: @unchecked Sendable {
     public static let shared = HotKeyManager()
 
     
@@ -96,9 +95,7 @@ public class HotKeyManager {
                 { _, event, _ -> OSStatus in
                     guard let event else { return noErr }
                     let kind = GetEventKind(event)
-                    Task { @MainActor in
-                        HotKeyManager.shared.handleHotKeyEvent(kind: kind)
-                    }
+                    HotKeyManager.deliverHotKeyEvent(kind: kind)
                     return noErr
                 },
                 buffer.count,
@@ -120,6 +117,22 @@ public class HotKeyManager {
         // only one trigger per press+release cycle and enforces cooldown.
         if pressState.shouldTrigger(for: kind, now: now) {
             onTrigger?()
+        }
+    }
+
+    #if DEBUG
+    public func __test_handleHotKeyEvent(kind: UInt32, now: TimeInterval) {
+        handleHotKeyEvent(kind: kind, now: now)
+    }
+    #endif
+
+    nonisolated private static func deliverHotKeyEvent(kind: UInt32) {
+        if Thread.isMainThread {
+            shared.handleHotKeyEvent(kind: kind)
+        } else {
+            DispatchQueue.main.async {
+                shared.handleHotKeyEvent(kind: kind)
+            }
         }
     }
     
