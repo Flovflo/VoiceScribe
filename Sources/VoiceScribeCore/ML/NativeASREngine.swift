@@ -322,23 +322,20 @@ public actor NativeASREngine {
         let statusLabel = (preferredLanguage?.isEmpty == false) ? preferredLanguage! : "auto"
         emit(.status("Transcribing (\(statusLabel))..."))
         
-        let device: Device = useCPUDevice ? .cpu : .gpu
         nonisolated(unsafe) let unsafeModel = model
         let unsafeTokenizer = tokenizer
         var triedLanguages = Set<String>()
         let debugASR = ProcessInfo.processInfo.environment["VOICESCRIBE_DEBUG_ASR"] == "1"
 
         func runOnce(language: String?) -> (raw: String, cleaned: String) {
-            let raw = Device.withDefaultDevice(device) {
-                unsafeModel.generate(
-                    audioFeatures: inputBatch,
-                    tokenizer: unsafeTokenizer,
-                    audioTokenID: audioTokenID,
-                    language: language,
-                    context: config.context,
-                    maxTokens: config.maxTokens
-                )
-            }
+            let raw = unsafeModel.generate(
+                audioFeatures: inputBatch,
+                tokenizer: unsafeTokenizer,
+                audioTokenID: audioTokenID,
+                language: language,
+                context: config.context,
+                maxTokens: config.maxTokens
+            )
             let parsed = Self.parseASROutput(raw: raw, forcedLanguage: language)
             let cleaned = parsed.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if debugASR {
