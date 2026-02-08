@@ -25,9 +25,26 @@ find_mlx_metallib_source() {
     candidates+=(
         "$SRC_ROOT/$MLX_METALLIB_NAME"
         "$SRC_ROOT/mlx.metallib"
+        "/System/Library/PrivateFrameworks/CorePhotogrammetry.framework/Resources/mlx.metallib"
+        "/System/Library/PrivateFrameworks/CorePhotogrammetry.framework/Versions/Current/Resources/mlx.metallib"
         "/System/Library/PrivateFrameworks/CorePhotogrammetry.framework/Versions/A/Resources/mlx.metallib"
+        "/System/Library/PrivateFrameworks/GESS.framework/Resources/mlx.metallib"
+        "/System/Library/PrivateFrameworks/GESS.framework/Versions/Current/Resources/mlx.metallib"
         "/System/Library/PrivateFrameworks/GESS.framework/Versions/A/Resources/mlx.metallib"
     )
+
+    if [ -n "${MD_APPLE_SDK_ROOT:-}" ]; then
+        candidates+=(
+            "${MD_APPLE_SDK_ROOT}/System/Library/PrivateFrameworks/CorePhotogrammetry.framework/Resources/mlx.metallib"
+            "${MD_APPLE_SDK_ROOT}/System/Library/PrivateFrameworks/CorePhotogrammetry.framework/Versions/A/Resources/mlx.metallib"
+            "${MD_APPLE_SDK_ROOT}/System/Library/PrivateFrameworks/GESS.framework/Resources/mlx.metallib"
+            "${MD_APPLE_SDK_ROOT}/System/Library/PrivateFrameworks/GESS.framework/Versions/A/Resources/mlx.metallib"
+            "${MD_APPLE_SDK_ROOT}/Platforms/MacOSX.platform/System/Library/PrivateFrameworks/CorePhotogrammetry.framework/Resources/mlx.metallib"
+            "${MD_APPLE_SDK_ROOT}/Platforms/MacOSX.platform/System/Library/PrivateFrameworks/CorePhotogrammetry.framework/Versions/A/Resources/mlx.metallib"
+            "${MD_APPLE_SDK_ROOT}/Platforms/MacOSX.platform/System/Library/PrivateFrameworks/GESS.framework/Resources/mlx.metallib"
+            "${MD_APPLE_SDK_ROOT}/Platforms/MacOSX.platform/System/Library/PrivateFrameworks/GESS.framework/Versions/A/Resources/mlx.metallib"
+        )
+    fi
 
     for path in "${candidates[@]}"; do
         if [ -f "$path" ]; then
@@ -35,6 +52,104 @@ find_mlx_metallib_source() {
             return 0
         fi
     done
+
+    local find_roots=(
+        "/System/Library/PrivateFrameworks"
+    )
+    if [ -n "${MD_APPLE_SDK_ROOT:-}" ]; then
+        find_roots+=(
+            "${MD_APPLE_SDK_ROOT}/System/Library/PrivateFrameworks"
+            "${MD_APPLE_SDK_ROOT}/Platforms/MacOSX.platform/System/Library/PrivateFrameworks"
+        )
+    fi
+    for root in "${find_roots[@]}"; do
+        if [ -d "$root" ]; then
+            local discovered
+            discovered=$(find "$root" -name "mlx.metallib" -type f 2>/dev/null | head -n 1 || true)
+            if [ -n "$discovered" ]; then
+                echo "$discovered"
+                return 0
+            fi
+        fi
+    done
+
+    local mlx_root="$SRC_ROOT/.build/checkouts/mlx-swift/Source/Cmlx/mlx"
+    local kernels_dir="$mlx_root/mlx/backend/metal/kernels"
+    local generated_metallib="$SRC_ROOT/.build/voicescribe-metallib/mlx.metallib"
+    if [ -d "$kernels_dir" ] && xcrun -sdk macosx metal -v >/dev/null 2>&1; then
+        rm -rf "$SRC_ROOT/.build/voicescribe-metallib"
+        mkdir -p "$SRC_ROOT/.build/voicescribe-metallib"
+
+        local kernel_names=(
+            "arg_reduce"
+            "conv"
+            "gemv"
+            "layer_norm"
+            "random"
+            "rms_norm"
+            "rope"
+            "scaled_dot_product_attention"
+            "fence"
+            "arange"
+            "binary"
+            "binary_two"
+            "copy"
+            "fft"
+            "reduce"
+            "quantized"
+            "fp_quantized"
+            "scan"
+            "softmax"
+            "logsumexp"
+            "sort"
+            "ternary"
+            "unary"
+            "steel/conv/kernels/steel_conv"
+            "steel/conv/kernels/steel_conv_general"
+            "steel/gemm/kernels/steel_gemm_fused"
+            "steel/gemm/kernels/steel_gemm_gather"
+            "steel/gemm/kernels/steel_gemm_masked"
+            "steel/gemm/kernels/steel_gemm_splitk"
+            "steel/gemm/kernels/steel_gemm_segmented"
+            "gemv_masked"
+            "steel/attn/kernels/steel_attention"
+            "steel/gemm/kernels/steel_gemm_fused_nax"
+            "steel/gemm/kernels/steel_gemm_gather_nax"
+            "quantized_nax"
+            "fp_quantized_nax"
+            "steel/attn/kernels/steel_attention_nax"
+        )
+
+        local air_files=()
+        local name src air_file safe_name
+        for name in "${kernel_names[@]}"; do
+            src="$kernels_dir/$name.metal"
+            if [ ! -f "$src" ]; then
+                continue
+            fi
+            safe_name="${name//\//_}"
+            air_file="$SRC_ROOT/.build/voicescribe-metallib/${safe_name}.air"
+            if ! xcrun -sdk macosx metal \
+                -x metal \
+                -Wall \
+                -Wextra \
+                -fno-fast-math \
+                -Wno-c++17-extensions \
+                -Wno-c++20-extensions \
+                -c "$src" \
+                -I"$mlx_root" \
+                -o "$air_file"; then
+                air_files=()
+                break
+            fi
+            air_files+=("$air_file")
+        done
+
+        if [ "${#air_files[@]}" -gt 0 ] && xcrun -sdk macosx metallib "${air_files[@]}" -o "$generated_metallib"; then
+            echo "$generated_metallib"
+            return 0
+        fi
+    fi
 
     return 1
 }
