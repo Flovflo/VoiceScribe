@@ -99,6 +99,7 @@ public class AudioRecorder: ObservableObject {
     @Published public var audioLevel: Float = 0.0
     
     private let targetSampleRate: Double = 16000
+    public var outputSampleRate: Int { Int(targetSampleRate) }
     
     public init() {
         logger.info("AudioRecorder initialized")
@@ -152,33 +153,50 @@ public class AudioRecorder: ObservableObject {
         
         logger.info("Stopped with \(samples.count) samples at \(sourceRate)Hz")
         
-        return resampleTo16kHz(samples, fromRate: sourceRate)
+        return resample(samples, from: sourceRate, to: targetSampleRate)
     }
     
-    private func resampleTo16kHz(_ samples: [Float], fromRate sourceRate: Double) -> [Float] {
-        guard sourceRate > 0 && sourceRate != targetSampleRate else {
-            return samples
+    private func resample(_ inputSamples: [Float], from sourceRate: Double, to destinationRate: Double) -> [Float] {
+        guard sourceRate > 0 && sourceRate != destinationRate else {
+            return inputSamples
         }
         
-        let ratio = sourceRate / targetSampleRate
-        let outputCount = Int(Double(samples.count) / ratio)
-        guard outputCount > 0 else { return [] }
+        let sourceFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sourceRate, channels: 1, interleaved: false)!
+        let destFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: destinationRate, channels: 1, interleaved: false)!
         
-        var resampled = [Float](repeating: 0, count: outputCount)
-        
-        for i in 0..<outputCount {
-            let srcIndex = Double(i) * ratio
-            let srcIndexInt = Int(srcIndex)
-            let fraction = Float(srcIndex - Double(srcIndexInt))
-            
-            if srcIndexInt + 1 < samples.count {
-                resampled[i] = samples[srcIndexInt] * (1 - fraction) + samples[srcIndexInt + 1] * fraction
-            } else if srcIndexInt < samples.count {
-                resampled[i] = samples[srcIndexInt]
-            }
+        guard let converter = AVAudioConverter(from: sourceFormat, to: destFormat) else {
+            logger.error("Failed to create audio converter")
+            return []
         }
         
-        logger.info("Resampled \(samples.count) -> \(resampled.count)")
-        return resampled
+        let inputBuffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: AVAudioFrameCount(inputSamples.count))!
+        inputBuffer.frameLength = AVAudioFrameCount(inputSamples.count)
+        if let data = inputBuffer.floatChannelData {
+            data[0].update(from: inputSamples, count: inputSamples.count)
+        }
+        
+        let ratio = destinationRate / sourceRate
+        let capacity = AVAudioFrameCount(Double(inputSamples.count) * ratio) + 100 // slightly larger buffer
+        let outputBuffer = AVAudioPCMBuffer(pcmFormat: destFormat, frameCapacity: capacity)!
+        
+        var error: NSError?
+        let inputBlock: AVAudioConverterInputBlock = { inNumPackets, outStatus in
+            outStatus.pointee = .haveData
+            return inputBuffer
+        }
+        
+        converter.convert(to: outputBuffer, error: &error, withInputFrom: inputBlock)
+        
+        if let error = error {
+            logger.error("Audio conversion error: \(error.localizedDescription)")
+            return []
+        }
+        
+        guard let outputData = outputBuffer.floatChannelData else { return [] }
+        let outputCount = Int(outputBuffer.frameLength)
+        let outputSamples = Array(UnsafeBufferPointer(start: outputData[0], count: outputCount))
+        
+        logger.info("Resampled \(inputSamples.count) -> \(outputSamples.count) (CoreAudio High Quality)")
+        return outputSamples
     }
 }

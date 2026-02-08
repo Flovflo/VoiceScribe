@@ -7,15 +7,17 @@ struct VoiceScribeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
-
-        WindowGroup {
+        Window("VoiceScribe HUD", id: "hud-window") {
             GlassView()
-                .edgesIgnoringSafeArea(.all)
+                .frame(width: GlassView.hudWidth, height: GlassView.hudHeight)
+                .background(Color.clear)
         }
-
-
-
         .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .commands {
+            // Disable default commands to avoid "New Window" options being easily accessible if not desired
+            CommandGroup(replacing: .newItem) { }
+        }
     }
 }
 
@@ -32,39 +34,22 @@ class ClickableWindow: NSWindow {
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
-    var floatWindow: ClickableWindow?
+    static let hudWindowIdentifier = NSUserInterfaceItemIdentifier("VoiceScribeHUDWindow")
+
+    var floatWindow: NSWindow?
     var statusItem: NSStatusItem?
     var settingsWindow: NSWindow?
     var onboardingWindow: NSWindow?
+    private var isToggleInFlight = false
+    private var lastToggleUptime: TimeInterval = -Double.greatestFiniteMagnitude
+    private let toggleCooldown: TimeInterval = 0.35
     
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Close any SwiftUI-created windows
-        for window in NSApplication.shared.windows {
-            window.close()
-        }
-        
-        // Create our own clickable window
-        let window = ClickableWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 450, height: 80),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        
-        let hostingView = NSHostingView(rootView: GlassView())
-        window.contentView = hostingView
-        
-        floatWindow = window
-        configureWindow(window)
-        
-        // Show onboarding on first launch, otherwise show HUD
-        if !hasCompletedOnboarding {
-            showOnboarding()
-        } else {
-            window.makeKeyAndOrderFront(nil)
-        }
+        // Keep this menu-bar/HUD style app alive even when no standard window is visible.
+        ProcessInfo.processInfo.disableAutomaticTermination("VoiceScribe background service")
+        ProcessInfo.processInfo.disableSuddenTermination()
         
         setupStatusItem()
         
@@ -73,6 +58,85 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         HotKeyManager.shared.onTrigger = { [weak self] in
             self?.toggleApp()
         }
+
+        // Wait for SwiftUI WindowGroup window, then attach HUD behavior to it.
+        DispatchQueue.main.async { [weak self] in
+            _ = self?.attachMainWindowIfNeeded()
+        }
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppDidBecomeActive),
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleAppDidBecomeActive() {
+        guard let window = attachMainWindowIfNeeded() else { return }
+        collapseDuplicateHUDWindows(keeping: window)
+        window.level = .floating
+    }
+
+    @discardableResult
+    private func attachMainWindowIfNeeded() -> NSWindow? {
+        if let existing = floatWindow {
+            configureWindow(existing)
+            return existing
+        }
+
+        let hudWindows = findHUDWindows()
+        guard let window = hudWindows.first else { return nil }
+
+        floatWindow = window
+        configureWindow(window)
+        collapseDuplicateHUDWindows(keeping: window)
+
+        if !hasCompletedOnboarding {
+            window.orderOut(nil)
+            showOnboarding()
+        } else {
+            window.makeKeyAndOrderFront(nil)
+        }
+        return window
+    }
+
+    private func findHUDWindows() -> [NSWindow] {
+        let candidates = NSApplication.shared.windows.filter { window in
+            window != onboardingWindow && window != settingsWindow
+        }
+
+        let identified = candidates.filter { $0.identifier == Self.hudWindowIdentifier }
+        if !identified.isEmpty {
+            return identified
+        }
+
+        let sized = candidates.filter { window in
+            abs(window.frame.width - GlassView.hudWidth) < 2
+                && abs(window.frame.height - GlassView.hudHeight) < 2
+        }
+        if !sized.isEmpty {
+            return sized
+        }
+
+        return candidates
+    }
+
+    private func collapseDuplicateHUDWindows(keeping primary: NSWindow) {
+        for window in findHUDWindows() where window != primary {
+            window.orderOut(nil)
+            window.close()
+        }
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        NotificationCenter.default.removeObserver(self)
+        ProcessInfo.processInfo.enableAutomaticTermination("VoiceScribe background service")
+        ProcessInfo.processInfo.enableSuddenTermination()
     }
     
     func showOnboarding() {
@@ -118,6 +182,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func configureWindow(_ window: NSWindow) {
+        window.identifier = Self.hudWindowIdentifier
         window.isOpaque = false
         window.backgroundColor = .clear
         window.titleVisibility = .hidden
@@ -128,6 +193,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.isMovableByWindowBackground = true
         window.hasShadow = false
         window.acceptsMouseMovedEvents = true
+        window.setContentSize(NSSize(width: GlassView.hudWidth, height: GlassView.hudHeight))
+        window.contentView?.wantsLayer = true
+        window.contentView?.layer?.backgroundColor = NSColor.clear.cgColor
         
         window.standardWindowButton(.closeButton)?.isHidden = true
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
@@ -135,15 +203,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if let screen = NSScreen.main {
             let screenRect = screen.visibleFrame
-            let x = (screenRect.width - 450) / 2
+            let x = (screenRect.width - GlassView.hudWidth) / 2
             let y = screenRect.height * 0.85
-            window.setFrame(NSRect(x: x, y: y, width: 450, height: 80), display: true)
+            window.setFrame(
+                NSRect(x: x, y: y, width: GlassView.hudWidth, height: GlassView.hudHeight),
+                display: true
+            )
         }
     }
     
     @objc func toggleApp() {
-        guard let window = floatWindow else { return }
-        
+        let now = ProcessInfo.processInfo.systemUptime
+        guard !isToggleInFlight else { return }
+        guard (now - lastToggleUptime) >= toggleCooldown else { return }
+        isToggleInFlight = true
+        defer {
+            isToggleInFlight = false
+            lastToggleUptime = now
+        }
+
+        guard let window = attachMainWindowIfNeeded() else { return }
+        collapseDuplicateHUDWindows(keeping: window)
+
         if window.isVisible {
             if AppState.shared.isRecording {
                 AppState.shared.toggleRecording()
@@ -153,13 +234,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             if let screen = NSScreen.main {
                 let screenRect = screen.visibleFrame
-                let x = (screenRect.width - 450) / 2
+                let x = (screenRect.width - GlassView.hudWidth) / 2
                 let y = screenRect.height * 0.85
                 window.setFrameOrigin(NSPoint(x: x, y: y))
             }
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
-            AppState.shared.toggleRecording()
+            if !AppState.shared.isRecording {
+                AppState.shared.toggleRecording()
+            }
         }
     }
 
@@ -208,104 +291,118 @@ struct VisualEffectView: NSViewRepresentable {
 
 
 struct GlassView: View {
+    static let hudWidth: CGFloat = 460
+    static let hudHeight: CGFloat = 88
+
     @ObservedObject var appState = AppState.shared
     
+    private var accentColor: Color {
+        if appState.isRecording {
+            return .red
+        }
+        return appState.isReady ? .green : .orange
+    }
+    
+    private var titleText: String {
+        if appState.isRecording {
+            return "Recording"
+        }
+        if appState.status.lowercased().contains("error") {
+            return "Attention"
+        }
+        return "VoiceScribe"
+    }
+
+    private var clampedAudioLevel: CGFloat {
+        max(0, min(1, CGFloat(appState.audioLevel)))
+    }
+
+    private var displayStatusText: String {
+        var text = appState.status
+            .replacingOccurrences(of: "🎤 ", with: "")
+            .replacingOccurrences(of: "✅ ", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if text.hasPrefix("Ready:") {
+            return "Ready"
+        }
+        if text.hasPrefix("Error:") {
+            text = text.replacingOccurrences(of: "Error: ", with: "")
+        }
+        return text
+    }
+    
     var body: some View {
-        HStack(spacing: 20) {
-            // Left Status Indicator
-            ZStack {
-                if appState.isRecording {
+        ZStack {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.black.opacity(0.86))
+
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+
+            HStack(spacing: 12) {
+                ZStack {
                     Circle()
-                        .stroke(Color.red.opacity(0.3), lineWidth: 4)
-                        .scaleEffect(1.2 + CGFloat(appState.audioLevel) * 2.0)
-                        .opacity(0.5 - Double(appState.audioLevel))
-                    
+                        .fill(accentColor.opacity(0.2))
+                        .frame(width: 28, height: 28)
                     Circle()
-                        .fill(Color.red)
-                        .frame(width: 12, height: 12)
-                        .shadow(color: .red.opacity(0.5), radius: 4)
-                } else {
-                    Circle()
-                        .fill(appState.isReady ? Color.green : Color.orange)
-                        .frame(width: 10, height: 10)
+                        .fill(accentColor)
+                        .frame(width: 9, height: 9)
                 }
-            }
-            .frame(width: 30, height: 30)
-            
-            // Textual Info
-            VStack(alignment: .leading, spacing: 2) {
-                if appState.isRecording {
-                    Text("LISTENING")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundColor(.red.opacity(0.8))
-                }
-                
-                Text(appState.status)
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                
-                if !appState.isRecording {
-                    Text("Model: Qwen3-ASR (Native MLX)")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.5))
-                }
-                
-                if appState.status.contains("Loading") || appState.status.contains("Downloading") {
-                    ProgressView()
-                        .progressViewStyle(.linear)
-                        .tint(.white)
-                        .scaleEffect(0.5, anchor: .leading)
-                        .frame(height: 2)
-                        .padding(.top, 4)
-                }
-            }
-            
-            Spacer()
-            
-            // Right Side: Visualizer or Controls
-            if appState.isRecording {
-                HStack(spacing: 3) {
-                    ForEach(0..<12) { _ in
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.white.opacity(0.8))
-                            .frame(width: 3, height: 8 + CGFloat(appState.audioLevel) * 30 * CGFloat.random(in: 0.3...1.7))
-                            .animation(.interactiveSpring(response: 0.2, dampingFraction: 0.5), value: appState.audioLevel)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(titleText.uppercased())
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.72))
+
+                    Text(displayStatusText)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.96))
+                        .lineLimit(1)
+
+                    if appState.status.contains("Loading") || appState.status.contains("Downloading") {
+                        ProgressView(value: appState.downloadProgress)
+                            .progressViewStyle(.linear)
+                            .tint(accentColor)
+                            .frame(width: 180)
                     }
                 }
-            } else {
-                HStack(spacing: 8) {
-                    // Just show keyboard shortcut hint and CPU badge
-                    Text("⌥ Space")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.5))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 7) {
+                    if appState.isRecording {
+                        Text("REC")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundColor(accentColor.opacity(0.96))
+
+                        ZStack(alignment: .leading) {
                             Capsule()
-                                .fill(Color.white.opacity(0.1))
-                        )
-                    
-                    Image(systemName: "cpu")
-                        .font(.system(size: 12))
-                        .foregroundColor(.green.opacity(0.8))
-                        .help("Apple Silicon Optimized")
+                                .fill(Color.white.opacity(0.14))
+                            Capsule()
+                                .fill(accentColor.opacity(0.95))
+                                .frame(width: max(10, 76 * clampedAudioLevel))
+                                .animation(.linear(duration: 0.08), value: clampedAudioLevel)
+                        }
+                        .frame(width: 76, height: 8)
+                    } else {
+                        Text("⌥ Space")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.9))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule()
+                                    .fill(Color.white.opacity(0.14))
+                            )
+                    }
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
-
-        .padding(.horizontal, 24)
-        .padding(.vertical, 14)
-        .background(
-            VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24)
-                        .stroke(LinearGradient(colors: [.white.opacity(0.4), .clear], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
-                )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 24))
-        .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
-        .frame(width: 450, height: 80)
+        .frame(width: Self.hudWidth, height: Self.hudHeight)
+        .background(Color.clear)
         .onAppear {
 
             Task { await appState.initialize() }
@@ -313,11 +410,12 @@ struct GlassView: View {
         .onChange(of: appState.transcript) { oldValue, newText in
             if !newText.isEmpty && !appState.isRecording {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    NSApp.windows.first?.orderOut(nil)
+                    for window in NSApp.windows where window.identifier == AppDelegate.hudWindowIdentifier {
+                        window.orderOut(nil)
+                    }
                     appState.clearTranscript()
                 }
             }
         }
     }
 }
-

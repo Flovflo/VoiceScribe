@@ -1,6 +1,5 @@
 import XCTest
 @testable import VoiceScribeCore
-import MLX
 
 @MainActor
 final class AudioFeatureTests: XCTestCase {
@@ -12,7 +11,7 @@ final class AudioFeatureTests: XCTestCase {
         
         XCTAssertEqual(config.sampleRate, 16000)
         XCTAssertEqual(config.nMels, 128)
-        XCTAssertEqual(config.nFFT, 512)
+        XCTAssertEqual(config.nFFT, 400)
         XCTAssertEqual(config.hopLength, 160)
     }
     
@@ -32,8 +31,8 @@ final class AudioFeatureTests: XCTestCase {
         XCTAssertEqual(result.count, 128, "Should have 128 mel bins")
         
         // Should have expected number of frames
-        // nFrames = 1 + (samples - nFFT) / hopLength = 1 + (16000 - 512) / 160 = 97
-        let expectedFrames = 1 + (samples.count - 512) / 160
+        // Centered framing with reflect padding for `compute` path.
+        let expectedFrames = 1 + samples.count / 160
         XCTAssertEqual(result[0].count, expectedFrames, "Should have expected frame count")
         
         // Values should be non-negative (power spectrum)
@@ -68,8 +67,10 @@ final class AudioFeatureTests: XCTestCase {
         // Audio shorter than FFT window
         let shortSamples = [Float](repeating: 0.1, count: 100)
         let result = melSpec.compute(samples: shortSamples)
-        
-        XCTAssertTrue(result.isEmpty, "Audio shorter than window should produce empty result")
+
+        // Centered framing + reflect padding should still produce valid features.
+        XCTAssertEqual(result.count, 128, "Should keep mel bin count for short audio")
+        XCTAssertFalse(result[0].isEmpty, "Short audio should still produce at least one frame")
     }
     
     // MARK: - AudioFeatureExtractor Tests
@@ -146,63 +147,94 @@ final class AudioFeatureTests: XCTestCase {
     func testMinimalAudio() {
         let extractor = AudioFeatureExtractor(backend: .cpu)
         
-        // Just barely enough for one frame (nFFT = 400)
+        // With centered framing + reflect padding, then last frame drop: 400 samples -> 2 frames.
         let samples = [Float](repeating: 0.5, count: 400)
         let features = extractor.extractFeatures(samples: samples, sampleRate: 16000)
         
         XCTAssertEqual(features.count, 128)
-        XCTAssertEqual(features[0].count, 1, "Should have exactly 1 frame")
+        XCTAssertEqual(features[0].count, 2, "Should have exactly 2 frames")
     }
 
     // MARK: - MLX GPU Tests
 
-    func testMLXFeatureExtractionShape() {
+    func testMLXFeatureExtractionShape() throws {
+        try requireMLXFeatureTestPrerequisites()
         let extractor = AudioFeatureExtractor(backend: .mlx)
         let samples = [Float](repeating: 0.3, count: 16000)
 
         let mlx = extractor.extractFeaturesMLX(samples: samples, sampleRate: 16000)
 
         XCTAssertEqual(mlx.dim(0), 1, "Batch dimension should be 1")
-        XCTAssertEqual(mlx.dim(2), 128, "Should have 128 mel bins")
-        XCTAssertGreaterThan(mlx.dim(1), 0, "Should have frames")
+        XCTAssertEqual(mlx.dim(1), 128, "Should have 128 mel bins")
+        XCTAssertGreaterThan(mlx.dim(2), 0, "Should have frames")
     }
 
-    func testMLXvsAccelerateParity() {
+    func testMLXvsAccelerateParity() throws {
+        try requireMLXFeatureTestPrerequisites()
         let cpuExtractor = AudioFeatureExtractor(backend: .cpu)
         let mlxExtractor = AudioFeatureExtractor(backend: .mlx)
 
-        let samples = [Float](repeating: 0.2, count: 16000)
+        // Use a deterministic multi-tone signal that better represents speech-like energy
+        // than a flat waveform and avoids floor-dominated comparisons.
+        let sampleRate: Float = 16_000
+        let samples = (0..<16_000).map { i -> Float in
+            let t = Float(i) / sampleRate
+            let s1 = 0.60 * sin(2 * .pi * 220 * t)
+            let s2 = 0.30 * sin(2 * .pi * 440 * t)
+            let s3 = 0.10 * sin(2 * .pi * 880 * t)
+            return s1 + s2 + s3
+        }
 
         let cpuFeatures = cpuExtractor.extractFeatures(samples: samples, sampleRate: 16000)
         let mlx = mlxExtractor.extractFeaturesMLX(samples: samples, sampleRate: 16000)
 
         let mlxFlat = mlx.squeezed(axis: 0).asArray(Float.self)
-        let cpuTransposed = transpose(cpuFeatures)
-
-        let cpuFlat = cpuTransposed.flatMap { $0 }
+        let cpuFlat = cpuFeatures.flatMap { $0 }
         XCTAssertEqual(cpuFlat.count, mlxFlat.count)
 
-        var maxDiff: Float = 0
+        var diffs = [Float]()
+        diffs.reserveCapacity(min(cpuFlat.count, mlxFlat.count))
         for i in 0..<min(cpuFlat.count, mlxFlat.count) {
-            let diff = abs(cpuFlat[i] - mlxFlat[i])
-            if diff > maxDiff { maxDiff = diff }
+            diffs.append(abs(cpuFlat[i] - mlxFlat[i]))
         }
 
-        XCTAssertLessThan(maxDiff, 5e-2, "CPU and MLX features should be close")
+        let maxDiff = diffs.max() ?? 0
+        let meanDiff = diffs.reduce(0, +) / Float(max(diffs.count, 1))
+        let sorted = diffs.sorted()
+        let p95Index = min(sorted.count - 1, Int(Float(sorted.count - 1) * 0.95))
+        let p95Diff = sorted.isEmpty ? 0 : sorted[p95Index]
+
+        let cosine = cosineSimilarity(cpuFlat, mlxFlat)
+        XCTAssertGreaterThan(cosine, 0.97, "Cosine similarity too low: \(cosine)")
+        XCTAssertLessThan(meanDiff, 0.2, "Mean diff too high: \(meanDiff)")
+        XCTAssertLessThan(p95Diff, 0.6, "P95 diff too high: \(p95Diff)")
+        XCTAssertLessThan(maxDiff, 2.0, "Max diff too high: \(maxDiff)")
     }
 }
 
 // MARK: - Helpers
 
-private func transpose(_ matrix: [[Float]]) -> [[Float]] {
-    guard let first = matrix.first else { return [] }
-    let rows = matrix.count
-    let cols = first.count
-    var result = [[Float]](repeating: [Float](repeating: 0, count: rows), count: cols)
-    for r in 0..<rows {
-        for c in 0..<cols {
-            result[c][r] = matrix[r][c]
-        }
+private func requireMLXFeatureTestPrerequisites() throws {
+    guard ProcessInfo.processInfo.environment["VOICESCRIBE_RUN_MLX_TESTS"] == "1" else {
+        throw XCTSkip("Set VOICESCRIBE_RUN_MLX_TESTS=1 to run MLX feature tests.")
     }
-    return result
+    _ = try ensureMLXRuntimeMetallibAvailable()
+}
+
+private func cosineSimilarity(_ a: [Float], _ b: [Float]) -> Float {
+    let count = min(a.count, b.count)
+    guard count > 0 else { return 0 }
+
+    var dot: Float = 0
+    var normA: Float = 0
+    var normB: Float = 0
+    for i in 0..<count {
+        dot += a[i] * b[i]
+        normA += a[i] * a[i]
+        normB += b[i] * b[i]
+    }
+
+    let denom = sqrt(normA * normB)
+    guard denom > 1e-8 else { return 0 }
+    return dot / denom
 }

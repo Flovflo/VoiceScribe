@@ -24,6 +24,7 @@ public class AppState: ObservableObject {
     public let engine = NativeASRService()
     
     private var cancellables = Set<AnyCancellable>()
+    private var isInitializing = false
     
     public init() {
         logger.info("🔧 AppState init")
@@ -65,9 +66,18 @@ public class AppState: ObservableObject {
     // MARK: - Lifecycle
 
     public func initialize() async {
+        guard !isInitializing else { return }
+        guard !isReady else { return }
+        isInitializing = true
+        defer { isInitializing = false }
+
         logger.info("🔧 initialize() called")
         status = "Loading Native ASR..."
         await engine.loadModel()
+        if !isReady, let lastError = engine.lastError {
+            status = "Model Error"
+            errorMessage = lastError
+        }
         logger.info("🔧 initialize() complete")
     }
 
@@ -124,17 +134,10 @@ public class AppState: ObservableObject {
         Task {
             logger.info("🎙️ Calling engine.transcribe()...")
             do {
-                // Native engine expects sampleRate. Recorder usually defaults to 16000 or system rate.
-                // We should ensure Recorder exposes its rate or we know it.
-                // Assuming 16000 based on previous code context, but best to ask recorder.
-                // Previously AudioRecorder was setting up for 16kHz? Let's assume standard behavior.
-                // NativeASR will resample if needed inside.
-                
-                // Note: recorder.stopRecording() returns [Float]. 
-                // We need to know the sample rate of captured audio.
-                // Assuming 16000 for now, matching NativeASREngine default.
-                
-                let text = try await engine.transcribe(samples: samples, sampleRate: 16000)
+                let text = try await engine.transcribe(
+                    samples: samples,
+                    sampleRate: recorder.outputSampleRate
+                )
                 logger.info("🎙️ Transcription result: \(text.prefix(50))...")
                 transcript = text
                 
@@ -148,21 +151,22 @@ public class AppState: ObservableObject {
                     
                     // Auto Paste
                     InputInjector.pasteFromClipboard()
+                } else {
+                    status = "No speech detected"
                 }
             } catch {
                 logger.error("Transcription error: \(error.localizedDescription)")
-                status = "Error"
+                if case ASRError.emptyTranscription = error {
+                    status = "No speech detected"
+                } else {
+                    status = "Error"
+                }
                 errorMessage = error.localizedDescription
             }
             
             try? await Task.sleep(for: .seconds(2))
             if !isRecording {
                 status = isReady ? "Ready" : "Waiting..."
-                if !transcript.isEmpty {
-                    // Maybe don't clear immediately so user can see it?
-                    // Previous logic cleared it. Keeping it transparent.
-                    transcript = "" 
-                }
             }
         }
     }

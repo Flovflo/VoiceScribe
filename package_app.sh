@@ -7,6 +7,31 @@ BINARY_NAME="VoiceScribe"
 SRC_ROOT=$(pwd)
 ICON_SOURCE="AppIcon.png"
 ICONSET_DIR="VoiceScribe.iconset"
+MLX_METALLIB_NAME="default.metallib"
+
+find_mlx_metallib_source() {
+    local candidates=()
+
+    if [ -n "${VOICESCRIBE_MLX_METALLIB_PATH:-}" ]; then
+        candidates+=("$VOICESCRIBE_MLX_METALLIB_PATH")
+    fi
+
+    candidates+=(
+        "$SRC_ROOT/$MLX_METALLIB_NAME"
+        "$SRC_ROOT/mlx.metallib"
+        "/System/Library/PrivateFrameworks/CorePhotogrammetry.framework/Versions/A/Resources/mlx.metallib"
+        "/System/Library/PrivateFrameworks/GESS.framework/Versions/A/Resources/mlx.metallib"
+    )
+
+    for path in "${candidates[@]}"; do
+        if [ -f "$path" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+
+    return 1
+}
 
 # Cleanup
 rm -rf "$APP_BUNDLE" "$ICONSET_DIR"
@@ -17,9 +42,28 @@ swift build -c release --arch arm64
 echo "📦 Creating Bundle Structure..."
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
+mkdir -p "$APP_BUNDLE/Contents/MacOS/Resources"
 
 echo "📋 Copying Artifacts..."
 cp ".build/arm64-apple-macosx/release/$BINARY_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+
+echo "🧠 Installing MLX Metallib..."
+if MLX_METALLIB_SOURCE=$(find_mlx_metallib_source); then
+    # MLX runtime probes multiple locations relative to the executable:
+    # 1) Contents/MacOS/mlx.metallib
+    # 2) Contents/MacOS/Resources/mlx.metallib
+    # 3) Contents/MacOS/Resources/default.metallib
+    # We also keep a canonical copy in Contents/Resources for app resources.
+    cp "$MLX_METALLIB_SOURCE" "$APP_BUNDLE/Contents/MacOS/mlx.metallib"
+    cp "$MLX_METALLIB_SOURCE" "$APP_BUNDLE/Contents/MacOS/Resources/mlx.metallib"
+    cp "$MLX_METALLIB_SOURCE" "$APP_BUNDLE/Contents/MacOS/Resources/$MLX_METALLIB_NAME"
+    cp "$MLX_METALLIB_SOURCE" "$APP_BUNDLE/Contents/Resources/$MLX_METALLIB_NAME"
+    echo "   Using: $MLX_METALLIB_SOURCE"
+else
+    echo "❌ Error: No MLX metallib source found."
+    echo "   Set VOICESCRIBE_MLX_METALLIB_PATH or place default.metallib in project root."
+    exit 1
+fi
 
 echo "🎨 Processing Icon..."
 if [ -f "$ICON_SOURCE" ]; then
@@ -67,7 +111,7 @@ cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
     <key>CFBundleVersion</key>
     <string>3</string>
     <key>LSUIElement</key>
-    <false/>
+    <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>VoiceScribe needs specific access to your microphone to transcribe your voice locally.</string>
     <key>NSHighResolutionCapable</key>

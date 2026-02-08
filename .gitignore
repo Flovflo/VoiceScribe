@@ -33,7 +33,11 @@ test_*.swift
 *.wav
 
 # Model cache (downloaded at runtime)
-models/
+/models/
+default.metallib
+default.metallib.bak
+*.metallib
+.metal_build/
 
 # Logs
 *.log

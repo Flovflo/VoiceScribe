@@ -1,4 +1,5 @@
 import XCTest
+import Carbon
 @testable import VoiceScribeCore
 
 final class VoiceScribeTests: XCTestCase {
@@ -36,6 +37,7 @@ final class VoiceScribeTests: XCTestCase {
         
         XCTAssertFalse(recorder.isRecording, "Should not be recording after init")
         XCTAssertEqual(recorder.audioLevel, 0.0, accuracy: 0.001, "Audio level should be 0")
+        XCTAssertEqual(recorder.outputSampleRate, 16000, "Recorder output should be 16kHz")
     }
     
     @MainActor
@@ -86,5 +88,26 @@ final class VoiceScribeTests: XCTestCase {
         
         // State should remain consistent
         XCTAssertFalse(appState.isRecording)
+    }
+
+    func testHotKeyTriggerGateDebouncesRapidEvents() {
+        var gate = HotKeyTriggerGate(cooldown: 0.30)
+
+        XCTAssertTrue(gate.allowsTrigger(now: 10.0))
+        XCTAssertFalse(gate.allowsTrigger(now: 10.05))
+        XCTAssertFalse(gate.allowsTrigger(now: 10.29))
+        XCTAssertTrue(gate.allowsTrigger(now: 10.31))
+    }
+
+    func testHotKeyPressStateIgnoresRepeatsUntilRelease() {
+        var state = HotKeyPressState(cooldown: 0.30)
+
+        XCTAssertTrue(state.shouldTrigger(for: UInt32(kEventHotKeyPressed), now: 1.0))
+        XCTAssertFalse(state.shouldTrigger(for: UInt32(kEventHotKeyPressed), now: 1.1))
+        XCTAssertFalse(state.shouldTrigger(for: UInt32(kEventHotKeyPressed), now: 1.5))
+
+        XCTAssertFalse(state.shouldTrigger(for: UInt32(kEventHotKeyReleased), now: 1.6))
+        XCTAssertTrue(state.shouldTrigger(for: UInt32(kEventHotKeyPressed), now: 1.7))
+        XCTAssertFalse(state.shouldTrigger(for: UInt32(kEventHotKeyPressed), now: 2.0))
     }
 }

@@ -1,5 +1,4 @@
 import Foundation
-import Accelerate
 import AVFoundation
 import MLX
 import os.log
@@ -15,10 +14,12 @@ public final class AudioFeatureExtractor {
 
     // MARK: - Properties
 
+    private let config: MelSpectrogram.Config
     private let melSpecCPU: MelSpectrogram
-    private let melSpecMLX: MLXMelSpectrogram
     private let targetSampleRate: Int
     private let backend: Backend
+    private let useCPUDeviceForMLX: Bool
+    private lazy var melSpecMLX: MLXMelSpectrogram = MLXMelSpectrogram(config: config)
 
     private static let logger = Logger(subsystem: "com.voicescribe", category: "AudioFeatureExtractor")
 
@@ -26,10 +27,12 @@ public final class AudioFeatureExtractor {
 
     /// Initialize with Qwen3-ASR compatible settings
     public init(config: MelSpectrogram.Config = .qwen3ASR, backend: Backend = .mlx) {
+        self.config = config
         self.melSpecCPU = MelSpectrogram(config: config)
-        self.melSpecMLX = MLXMelSpectrogram(config: config)
         self.targetSampleRate = config.sampleRate
         self.backend = backend
+        let envDevice = ProcessInfo.processInfo.environment["VOICESCRIBE_MLX_DEVICE"]?.lowercased()
+        self.useCPUDeviceForMLX = (envDevice == "cpu")
     }
 
     // MARK: - Public API
@@ -50,21 +53,32 @@ public final class AudioFeatureExtractor {
     }
 
     /// Extract features from raw audio samples using MLX (GPU).
-    /// - Returns: Log mel spectrogram features [1, nFrames, nMels]
+    /// - Returns: Log mel spectrogram features [1, nMels, nFrames]
     public func extractFeaturesMLX(samples: [Float], sampleRate: Int) -> MLXArray {
-        let resampled = resampleIfNeeded(samples: samples, sampleRate: sampleRate)
-        guard !resampled.isEmpty else { return MLXArray.zeros([0, 0, 0]) }
+        let device: Device = useCPUDeviceForMLX ? .cpu : .gpu
+        return Device.withDefaultDevice(device) {
+            let resampled = resampleIfNeeded(samples: samples, sampleRate: sampleRate)
+            guard !resampled.isEmpty else { return MLXArray.zeros([0, 0, 0]) }
 
-        let x = MLXArray(resampled)
-        let normalized = normalizeMLX(array: x)
+            let mel = melSpecMLX.computeLogMel(samples: resampled)
+            if mel.dim(0) == 0 {
+                return MLXArray.zeros([0, 0, 0])
+            }
 
-        let mel = melSpecMLX.computeLogMel(array: normalized)
-        if mel.dim(0) == 0 {
-            return MLXArray.zeros([0, 0, 0])
+            // MLXMelSpectrogram returns [nFrames, nMels].
+            // Qwen3-ASR expects [batch, nMels, nFrames] at audio encoder input.
+            let melTransposed = mel.transposed(1, 0)
+            if ProcessInfo.processInfo.environment["VOICESCRIBE_DUMP_FEATURE_STATS"] == "1" {
+                let flat = melTransposed.asArray(Float.self)
+                let minValue = flat.min() ?? 0
+                let maxValue = flat.max() ?? 0
+                let meanValue = flat.reduce(0, +) / Float(max(flat.count, 1))
+                print(
+                    "[AudioFeatureExtractor] shape=[\(melTransposed.dim(0)), \(melTransposed.dim(1))] min=\(minValue) max=\(maxValue) mean=\(meanValue)"
+                )
+            }
+            return melTransposed.expandedDimensions(axis: 0)
         }
-
-        // [nFrames, nMels] -> [1, nFrames, nMels]
-        return mel.expandedDimensions(axis: 0)
     }
 
     /// Extract features and flatten to 1D array for model input.
@@ -115,29 +129,6 @@ public final class AudioFeatureExtractor {
         return resampled
     }
 
-    /// Normalize audio to [-1, 1] range (CPU).
-    private func normalize(samples: [Float]) -> [Float] {
-        guard !samples.isEmpty else { return samples }
-
-        var maxVal: Float = 0
-        vDSP_maxmgv(samples, 1, &maxVal, vDSP_Length(samples.count))
-
-        guard maxVal > 0 else { return samples }
-
-        var normalized = [Float](repeating: 0, count: samples.count)
-        var scale = 1.0 / maxVal
-        vDSP_vsmul(samples, 1, &scale, &normalized, 1, vDSP_Length(samples.count))
-
-        return normalized
-    }
-
-    /// Normalize audio on GPU.
-    private func normalizeMLX(array: MLXArray) -> MLXArray {
-        let absMax = MLX.max(abs(array))
-        let safeMax = maximum(absMax, MLXArray(1e-8))
-        return array / safeMax
-    }
-
     private func resampleIfNeeded(samples: [Float], sampleRate: Int) -> [Float] {
         guard sampleRate > 0 else { return samples }
         guard sampleRate != targetSampleRate else { return samples }
@@ -147,25 +138,24 @@ public final class AudioFeatureExtractor {
 
     private func extractFeaturesCPU(samples: [Float], sampleRate: Int) -> [[Float]] {
         let resampled = resampleIfNeeded(samples: samples, sampleRate: sampleRate)
-        let normalized = normalize(samples: resampled)
-        return melSpecCPU.computeLogMel(samples: normalized)
+        return melSpecCPU.computeLogMel(samples: resampled)
     }
 
     private static func toCPUArray(_ mlx: MLXArray) -> [[Float]] {
         if mlx.ndim != 3 {
             return []
         }
-        let frames = mlx.dim(1)
-        let mels = mlx.dim(2)
+        let mels = mlx.dim(1)
+        let frames = mlx.dim(2)
         let flat = mlx.asArray(Float.self)
         if flat.count != frames * mels {
             return []
         }
 
         var output = [[Float]](repeating: [Float](repeating: 0, count: frames), count: mels)
-        for f in 0..<frames {
-            for m in 0..<mels {
-                output[m][f] = flat[f * mels + m]
+        for m in 0..<mels {
+            for f in 0..<frames {
+                output[m][f] = flat[m * frames + f]
             }
         }
         return output
@@ -192,13 +182,13 @@ public final class AudioFeatureExtractor {
 extension AudioFeatureExtractor {
 
     /// Extract features from audio file URL.
-    public func extractFeatures(from url: URL) async throws -> [[Float]] {
-        let (samples, sampleRate) = try await loadAudioFromURL(url)
+    public func extractFeatures(from url: URL) throws -> [[Float]] {
+        let (samples, sampleRate) = try loadAudioFromURL(url)
         return extractFeatures(samples: samples, sampleRate: sampleRate)
     }
 
     /// Load audio file and return samples with sample rate.
-    public func loadAudioFromURL(_ url: URL) async throws -> (samples: [Float], sampleRate: Int) {
+    public func loadAudioFromURL(_ url: URL) throws -> (samples: [Float], sampleRate: Int) {
         let audioFile = try AVAudioFile(forReading: url)
         let format = audioFile.processingFormat
         let frameCount = UInt32(audioFile.length)

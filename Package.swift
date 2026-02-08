@@ -11,7 +11,7 @@ let package = Package(
         .library(name: "VoiceScribeCore", targets: ["VoiceScribeCore"])
     ],
     dependencies: [
-        .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.21.0"),
+        .package(url: "https://github.com/ml-explore/mlx-swift", branch: "main"),
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.1.6")
     ],
     targets: [

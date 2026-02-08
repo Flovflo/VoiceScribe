@@ -4,6 +4,52 @@ import os.log
 
 private let logger = Logger(subsystem: "com.voicescribe", category: "HotKey")
 
+struct HotKeyTriggerGate {
+    private(set) var lastTriggerUptime: TimeInterval = -Double.greatestFiniteMagnitude
+    let cooldown: TimeInterval
+
+    init(cooldown: TimeInterval = 0.35) {
+        self.cooldown = cooldown
+    }
+
+    mutating func allowsTrigger(now: TimeInterval) -> Bool {
+        if (now - lastTriggerUptime) < cooldown {
+            return false
+        }
+        lastTriggerUptime = now
+        return true
+    }
+}
+
+struct HotKeyPressState {
+    let cooldown: TimeInterval
+    private(set) var isPressed: Bool = false
+    private var gate: HotKeyTriggerGate
+
+    init(cooldown: TimeInterval = 0.35) {
+        self.cooldown = cooldown
+        self.gate = HotKeyTriggerGate(cooldown: cooldown)
+    }
+
+    mutating func shouldTrigger(for kind: UInt32, now: TimeInterval) -> Bool {
+        switch kind {
+        case UInt32(kEventHotKeyPressed):
+            guard !isPressed else { return false }
+            isPressed = true
+            return gate.allowsTrigger(now: now)
+        case UInt32(kEventHotKeyReleased):
+            isPressed = false
+            return false
+        default:
+            return false
+        }
+    }
+
+    mutating func reset() {
+        isPressed = false
+        gate = HotKeyTriggerGate(cooldown: cooldown)
+    }
+}
 
 @MainActor
 public class HotKeyManager {
@@ -13,6 +59,7 @@ public class HotKeyManager {
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
     public var onTrigger: (() -> Void)?
+    private var pressState = HotKeyPressState()
     
     // Default: Option + Space
     // 49 = Space
@@ -37,21 +84,24 @@ public class HotKeyManager {
             return
         }
         
-        // Install event handler
-        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        // Install event handlers for key press and release to avoid key-repeat retriggers.
+        var eventTypes = [
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))
+        ]
         
         status = InstallEventHandler(
             GetApplicationEventTarget(),
             { _, event, _ -> OSStatus in
-                // Using a closure to capture 'shared' is tricky with C-function pointers.
-                // But since HotKeyManager is singleton, we can dispatch safely.
+                guard let event else { return noErr }
+                let kind = GetEventKind(event)
                 DispatchQueue.main.async {
-                    HotKeyManager.shared.onTrigger?()
+                    HotKeyManager.shared.handleHotKeyEvent(kind: kind)
                 }
                 return noErr
             },
-            1,
-            &eventType,
+            eventTypes.count,
+            &eventTypes,
             nil,
             &eventHandler
         )
@@ -60,6 +110,14 @@ public class HotKeyManager {
             logger.error("Failed to install event handler: \(status)")
         } else {
             logger.info("HotKey registered (Code: \(keyCode), Mods: \(modifiers))")
+        }
+    }
+
+    private func handleHotKeyEvent(kind: UInt32, now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        // Carbon can emit repeats while key is held; the state gate allows
+        // only one trigger per press+release cycle and enforces cooldown.
+        if pressState.shouldTrigger(for: kind, now: now) {
+            onTrigger?()
         }
     }
     
@@ -72,5 +130,6 @@ public class HotKeyManager {
             RemoveEventHandler(eventHandler)
             self.eventHandler = nil
         }
+        pressState.reset()
     }
 }

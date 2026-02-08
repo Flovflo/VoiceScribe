@@ -3,12 +3,7 @@ import VoiceScribeCore
 
 struct SettingsView: View {
     @ObservedObject var appState = AppState.shared
-    @AppStorage("selectedModel") private var selectedModel: String = "mlx-community/Qwen3-ASR-1.7B-8bit"
-    
-    let models = [
-        "mlx-community/Qwen3-ASR-0.6B-8bit",
-        "mlx-community/Qwen3-ASR-1.7B-8bit"
-    ]
+    private let requiredModel = "mlx-community/Qwen3-ASR-1.7B-8bit"
     
     var body: some View {
         Form {
@@ -16,19 +11,12 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Speech Recognition Model")
                         .font(.headline)
-                    
-                    Picker("", selection: $selectedModel) {
-                        ForEach(models, id: \.self) { model in
-                            Text(model.replacingOccurrences(of: "mlx-community/", with: ""))
-                                .tag(model)
-                        }
-                    }
-                    .pickerStyle(.radioGroup)
-                    .onChange(of: selectedModel) { _, newValue in
-                        appState.engine.setModel(newValue)
-                    }
-                    
-                    Text("1.7B is more accurate, 0.6B is faster.")
+
+                    Text(requiredModel)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(.primary)
+
+                    Text("Locked for quality and consistency.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

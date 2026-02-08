@@ -127,6 +127,19 @@ Built with:
 swift build -c release
 ```
 
+### Quality Validation (Native MLX)
+
+Strict validation checklist used on this branch:
+
+```bash
+swift test
+VOICESCRIBE_RUN_MLX_TESTS=1 swift test --filter AudioFeatureTests
+VOICESCRIBE_RUN_ASR_TESTS=1 swift test --filter NativeEngineTests
+```
+
+Detailed release/migration notes:
+- `docs/NATIVE_MLX_RELEASE.md`
+
 ---
 
 ## 📄 License
