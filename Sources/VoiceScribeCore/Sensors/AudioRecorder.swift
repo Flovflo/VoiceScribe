@@ -204,7 +204,12 @@ public class AudioRecorder: ObservableObject {
         
         logger.info("Starting recording...")
 
-        let preferredDeviceID = selectedInputDeviceUID.flatMap(Self.audioDeviceID(forUID:))
+        let preferredDeviceID: AudioDeviceID?
+        if let uid = selectedInputDeviceUID {
+            preferredDeviceID = Self.audioDeviceID(forUID: uid)
+        } else {
+            preferredDeviceID = nil
+        }
         if selectedInputDeviceUID != nil && preferredDeviceID == nil {
             refreshInputDevices()
             throw AudioRecorderError.engineSetupFailed("Selected microphone is unavailable")
@@ -315,7 +320,7 @@ public class AudioRecorder: ObservableObject {
         }
     }
 
-    private static func audioDeviceID(forUID uid: String) -> AudioDeviceID? {
+    nonisolated private static func audioDeviceID(forUID uid: String) -> AudioDeviceID? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -343,7 +348,7 @@ public class AudioRecorder: ObservableObject {
         return nil
     }
 
-    private static func deviceUID(for deviceID: AudioDeviceID) -> String? {
+    nonisolated private static func deviceUID(for deviceID: AudioDeviceID) -> String? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyDeviceUID,
             mScope: kAudioObjectPropertyScopeGlobal,
