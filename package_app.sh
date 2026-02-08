@@ -89,7 +89,6 @@ find_mlx_metallib_source() {
             "rms_norm"
             "rope"
             "scaled_dot_product_attention"
-            "fence"
             "arange"
             "binary"
             "binary_two"
@@ -139,8 +138,8 @@ find_mlx_metallib_source() {
                 -c "$src" \
                 -I"$mlx_root" \
                 -o "$air_file"; then
-                air_files=()
-                break
+                echo "⚠️ Warning: skipping unsupported kernel source '$name.metal'." >&2
+                continue
             fi
             air_files+=("$air_file")
         done
