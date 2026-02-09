@@ -3,6 +3,8 @@
 <div align="center">
 
 ### The local voice-to-text app for Mac: fast, private, native.
+<img width="535" height="145" alt="image" src="https://github.com/user-attachments/assets/a84ca1ec-492d-4ae3-9f3e-cb097ae9353f" />
+
 
 *Press one shortcut, speak, and text appears directly at your cursor.*
 
