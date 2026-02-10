@@ -153,4 +153,10 @@ final class VoiceScribeTests: XCTestCase {
         XCTAssertFalse(ASRModelCatalog.isSupportedASRModel("mlx-community/Qwen3-ForcedAligner-0.6B-8bit"))
         XCTAssertFalse(ASRModelCatalog.isSupportedASRModel("mlx-community/Llama-3.2-1B-Instruct-4bit"))
     }
+
+    func testHotKeyTogglePolicyNeverRequestsHUDHide() {
+        let policy = HotKeyTogglePolicy()
+        XCTAssertEqual(policy.action(windowVisible: true), .toggleRecordingOnly)
+        XCTAssertEqual(policy.action(windowVisible: false), .showHUDThenToggleRecording)
+    }
 }

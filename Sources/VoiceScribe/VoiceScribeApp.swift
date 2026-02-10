@@ -227,15 +227,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let window = attachMainWindowIfNeeded() else { return }
         collapseDuplicateHUDWindows(keeping: window)
         let appState = AppState.shared
-        let recordingActive = appState.isRecording || appState.isStartingRecording
-
-        if window.isVisible {
-            if recordingActive {
-                appState.toggleRecording()
-            } else {
-                window.orderOut(nil)
-            }
-        } else {
+        let action = HotKeyTogglePolicy().action(windowVisible: window.isVisible)
+        if action == .showHUDThenToggleRecording {
             if let screen = NSScreen.main {
                 let screenRect = screen.visibleFrame
                 let x = (screenRect.width - GlassView.hudWidth) / 2
@@ -244,10 +237,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
-            if !recordingActive {
-                appState.toggleRecording()
-            }
         }
+
+        // Hotkey semantic: always toggle recording state (start/stop),
+        // never hide the HUD while idle.
+        appState.toggleRecording()
     }
 
     @objc func openSettings() {

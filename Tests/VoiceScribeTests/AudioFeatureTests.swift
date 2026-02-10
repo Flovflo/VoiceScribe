@@ -155,6 +155,47 @@ final class AudioFeatureTests: XCTestCase {
         XCTAssertEqual(features[0].count, 2, "Should have exactly 2 frames")
     }
 
+    func testChunkingKeepsShortAudioAsSingleChunk() {
+        let extractor = AudioFeatureExtractor(backend: .cpu)
+        let sampleRate = 16_000
+        let samples = [Float](repeating: 0.2, count: sampleRate * 3) // 3s
+
+        let chunks = extractor.splitIntoChunks(
+            samples: samples,
+            sampleRate: sampleRate,
+            chunkDuration: 10.0
+        )
+
+        XCTAssertEqual(chunks.count, 1)
+        XCTAssertEqual(chunks[0].offsetSeconds, 0, accuracy: 0.001)
+        XCTAssertEqual(chunks[0].samples.count, samples.count)
+    }
+
+    func testChunkingSplitsLongAudio() {
+        let extractor = AudioFeatureExtractor(backend: .cpu)
+        let sampleRate = 16_000
+        let durationSeconds = 26
+        let samples = [Float](repeating: 0.15, count: sampleRate * durationSeconds)
+
+        let chunks = extractor.splitIntoChunks(
+            samples: samples,
+            sampleRate: sampleRate,
+            chunkDuration: 10.0,
+            minChunkDuration: 1.0
+        )
+
+        XCTAssertGreaterThan(chunks.count, 2, "Long audio should be split into multiple chunks")
+        XCTAssertEqual(chunks[0].offsetSeconds, 0, accuracy: 0.001)
+
+        for i in 1..<chunks.count {
+            XCTAssertGreaterThan(
+                chunks[i].offsetSeconds,
+                chunks[i - 1].offsetSeconds,
+                "Chunk offsets should be strictly increasing"
+            )
+        }
+    }
+
     // MARK: - MLX GPU Tests
 
     func testMLXFeatureExtractionShape() throws {

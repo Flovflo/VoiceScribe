@@ -12,6 +12,16 @@ public final class AudioFeatureExtractor {
         case mlx
     }
 
+    public struct AudioChunk: Sendable {
+        public let samples: [Float]
+        public let offsetSeconds: Float
+
+        public init(samples: [Float], offsetSeconds: Float) {
+            self.samples = samples
+            self.offsetSeconds = offsetSeconds
+        }
+    }
+
     // MARK: - Properties
 
     private let config: MelSpectrogram.Config
@@ -99,6 +109,97 @@ public final class AudioFeatureExtractor {
         let features = extractFeatures(samples: samples, sampleRate: sampleRate)
         guard !features.isEmpty else { return (0, 0) }
         return (features.count, features[0].count)
+    }
+
+    /// Split long audio into chunks near low-energy boundaries.
+    /// Returns a single chunk for short recordings.
+    public func splitIntoChunks(
+        samples: [Float],
+        sampleRate: Int,
+        chunkDuration: Float,
+        minChunkDuration: Float = 1.0,
+        searchExpandSeconds: Float = 2.0,
+        minWindowMs: Float = 100.0
+    ) -> [AudioChunk] {
+        guard sampleRate > 0, !samples.isEmpty, chunkDuration > 0 else {
+            return [AudioChunk(samples: samples, offsetSeconds: 0)]
+        }
+
+        let totalSamples = samples.count
+        let maxChunkSamples = max(1, Int(Float(sampleRate) * chunkDuration))
+        if totalSamples <= maxChunkSamples {
+            return [AudioChunk(samples: samples, offsetSeconds: 0)]
+        }
+
+        let searchSamples = max(1, Int(Float(sampleRate) * searchExpandSeconds))
+        let windowSize = max(1, Int(Float(sampleRate) * (minWindowMs / 1000.0)))
+        let minChunkSamples = max(1, Int(Float(sampleRate) * minChunkDuration))
+
+        var chunks: [AudioChunk] = []
+        chunks.reserveCapacity(max(1, totalSamples / maxChunkSamples + 1))
+
+        var start = 0
+        while start < totalSamples {
+            let naturalEnd = min(totalSamples, start + maxChunkSamples)
+            if naturalEnd >= totalSamples {
+                var finalSamples = Array(samples[start..<totalSamples])
+                if finalSamples.count < minChunkSamples {
+                    finalSamples.append(contentsOf: repeatElement(0, count: minChunkSamples - finalSamples.count))
+                }
+                let offset = Float(start) / Float(sampleRate)
+                chunks.append(AudioChunk(samples: finalSamples, offsetSeconds: offset))
+                break
+            }
+
+            let searchStart = max(start, naturalEnd - searchSamples)
+            let searchEnd = min(totalSamples, naturalEnd + searchSamples)
+            let searchRegion = Array(samples[searchStart..<searchEnd])
+
+            var cut = naturalEnd
+            if searchRegion.count > windowSize {
+                var windowEnergy: Float = 0
+                for i in 0..<windowSize {
+                    let v = searchRegion[i]
+                    windowEnergy += v * v
+                }
+
+                let invWindow = 1.0 / Float(windowSize)
+                let energyLength = searchRegion.count - windowSize + 1
+                var minEnergy = windowEnergy * invWindow
+                var minIndex = 0
+
+                if energyLength > 1 {
+                    for i in 1..<energyLength {
+                        let old = searchRegion[i - 1]
+                        let new = searchRegion[i + windowSize - 1]
+                        windowEnergy += new * new - old * old
+                        let e = windowEnergy * invWindow
+                        if e < minEnergy {
+                            minEnergy = e
+                            minIndex = i
+                        }
+                    }
+                }
+
+                cut = searchStart + minIndex + (windowSize / 2)
+            }
+
+            cut = max(cut, start + sampleRate)
+            cut = min(cut, totalSamples)
+
+            var chunkSamples = Array(samples[start..<cut])
+            if chunkSamples.count < minChunkSamples {
+                chunkSamples.append(contentsOf: repeatElement(0, count: minChunkSamples - chunkSamples.count))
+            }
+            let offset = Float(start) / Float(sampleRate)
+            chunks.append(AudioChunk(samples: chunkSamples, offsetSeconds: offset))
+            start = cut
+        }
+
+        if chunks.isEmpty {
+            return [AudioChunk(samples: samples, offsetSeconds: 0)]
+        }
+        return chunks
     }
 
     // MARK: - Audio Processing
