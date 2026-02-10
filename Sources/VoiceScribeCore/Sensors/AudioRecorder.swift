@@ -358,7 +358,9 @@ public class AudioRecorder: ObservableObject {
     ) async -> Bool {
         await withCheckedContinuation { continuation in
             request { granted in
-                continuation.resume(returning: granted)
+                Task { @MainActor in
+                    continuation.resume(returning: granted)
+                }
             }
         }
     }

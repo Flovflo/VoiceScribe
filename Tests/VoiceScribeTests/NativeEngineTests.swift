@@ -3,6 +3,18 @@ import Foundation
 @testable import VoiceScribeCore
 
 final class NativeEngineTests: XCTestCase {
+    func testDisplayCleanerRemovesLanguageMetadataTags() {
+        let raw = "Test. language Finnish<asr_text>test"
+        let cleaned = NativeASREngine.cleanTranscriptionForDisplay(raw)
+        XCTAssertEqual(cleaned, "test")
+    }
+
+    func testDisplayCleanerRemovesSpecialTokens() {
+        let raw = "<|im_start|>assistant\nlanguage French<asr_text>bonjour"
+        let cleaned = NativeASREngine.cleanTranscriptionForDisplay(raw)
+        XCTAssertEqual(cleaned, "bonjour")
+    }
+
     func testRejectsUnsupportedModelOutsideQwen3Collection() async throws {
         let engine = NativeASREngine(
             config: .init(modelName: "mlx-community/Llama-3.2-1B-Instruct-4bit")

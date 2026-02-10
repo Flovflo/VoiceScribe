@@ -26,13 +26,17 @@ public actor NativeASREngine {
         public let temperature: Float
         public let forcedLanguage: String?
         public let context: String
+        public let chunkDurationSeconds: Float
+        public let minChunkDurationSeconds: Float
 
         public static let qwen3ASR_1_7B_8bit = Config(
             modelName: requiredModelID,
             maxTokens: 256,
             temperature: 0.0,
             forcedLanguage: nil,
-            context: ""
+            context: "",
+            chunkDurationSeconds: 30,
+            minChunkDurationSeconds: 1
         )
 
         public init(
@@ -40,13 +44,17 @@ public actor NativeASREngine {
             maxTokens: Int = 448,
             temperature: Float = 0.0,
             forcedLanguage: String? = nil,
-            context: String = ""
+            context: String = "",
+            chunkDurationSeconds: Float = 30,
+            minChunkDurationSeconds: Float = 1
         ) {
             self.modelName = modelName
             self.maxTokens = maxTokens
             self.temperature = temperature
             self.forcedLanguage = forcedLanguage
             self.context = context
+            self.chunkDurationSeconds = chunkDurationSeconds
+            self.minChunkDurationSeconds = minChunkDurationSeconds
         }
     }
 
@@ -309,75 +317,109 @@ public actor NativeASREngine {
         }
 
         emit(.status("Processing audio..."))
-
-        var inputBatch = featureExtractor.extractFeaturesMLX(samples: samples, sampleRate: sampleRate)
-        if ProcessInfo.processInfo.environment["VOICESCRIBE_MATERIALIZE_FEATURES"] == "1" {
-            MLX.eval(inputBatch)
-            let materialized = inputBatch.asArray(Float.self)
-            inputBatch = MLXArray(materialized, inputBatch.shape)
-        }
-        guard inputBatch.dim(0) > 0 else { throw ASRError.audioTooShort }
-
         let preferredLanguage = config.forcedLanguage?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let statusLabel = (preferredLanguage?.isEmpty == false) ? preferredLanguage! : "auto"
-        emit(.status("Transcribing (\(statusLabel))..."))
-        
         nonisolated(unsafe) let unsafeModel = model
         let unsafeTokenizer = tokenizer
-        var triedLanguages = Set<String>()
         let debugASR = ProcessInfo.processInfo.environment["VOICESCRIBE_DEBUG_ASR"] == "1"
+        let chunks = featureExtractor.splitIntoChunks(
+            samples: samples,
+            sampleRate: sampleRate,
+            chunkDuration: config.chunkDurationSeconds,
+            minChunkDuration: config.minChunkDurationSeconds
+        )
 
-        func runOnce(language: String?) -> (raw: String, cleaned: String) {
-            let raw = unsafeModel.generate(
-                audioFeatures: inputBatch,
-                tokenizer: unsafeTokenizer,
-                audioTokenID: audioTokenID,
-                language: language,
-                context: config.context,
-                maxTokens: config.maxTokens
-            )
-            let parsed = Self.parseASROutput(raw: raw, forcedLanguage: language)
-            let cleaned = parsed.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if debugASR {
-                let compactRaw = raw.replacingOccurrences(of: "\n", with: "\\n")
-                let languageLabel = language?.isEmpty == false ? language! : "auto"
-                print("[NativeASREngine] attempt language=\(languageLabel) raw=\(compactRaw) cleaned=\(cleaned)")
+        var mergedTranscripts = [String]()
+        mergedTranscripts.reserveCapacity(chunks.count)
+        var rawFallback: String?
+        var processedChunks = 0
+
+        for (index, chunk) in chunks.enumerated() {
+            var inputBatch = featureExtractor.extractFeaturesMLX(samples: chunk.samples, sampleRate: sampleRate)
+            if ProcessInfo.processInfo.environment["VOICESCRIBE_MATERIALIZE_FEATURES"] == "1" {
+                MLX.eval(inputBatch)
+                let materialized = inputBatch.asArray(Float.self)
+                inputBatch = MLXArray(materialized, inputBatch.shape)
             }
-            return (raw, cleaned)
-        }
+            guard inputBatch.dim(0) > 0 else { continue }
+            processedChunks += 1
 
-        var attempt = runOnce(language: preferredLanguage?.isEmpty == false ? preferredLanguage : nil)
-        if let preferredLanguage, !preferredLanguage.isEmpty {
-            triedLanguages.insert(preferredLanguage.lowercased())
-        } else {
-            triedLanguages.insert("auto")
-        }
-        if attempt.cleaned.isEmpty {
-            for fallback in ["French", "English"] {
-                let key = fallback.lowercased()
-                if triedLanguages.contains(key) {
-                    continue
+            let statusLabel = (preferredLanguage?.isEmpty == false) ? preferredLanguage! : "auto"
+            if chunks.count > 1 {
+                emit(.status("Transcribing \(index + 1)/\(chunks.count) (\(statusLabel))..."))
+            } else {
+                emit(.status("Transcribing (\(statusLabel))..."))
+            }
+
+            func runOnce(language: String?) -> (raw: String, cleaned: String) {
+                let raw = unsafeModel.generate(
+                    audioFeatures: inputBatch,
+                    tokenizer: unsafeTokenizer,
+                    audioTokenID: audioTokenID,
+                    language: language,
+                    context: config.context,
+                    maxTokens: config.maxTokens
+                )
+                let parsed = Self.parseASROutput(raw: raw, forcedLanguage: language)
+                let cleaned = parsed.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if debugASR {
+                    let compactRaw = raw.replacingOccurrences(of: "\n", with: "\\n")
+                    let languageLabel = language?.isEmpty == false ? language! : "auto"
+                    print("[NativeASREngine] attempt language=\(languageLabel) raw=\(compactRaw) cleaned=\(cleaned)")
                 }
-                triedLanguages.insert(key)
-                let retry = runOnce(language: fallback)
-                if !retry.cleaned.isEmpty {
-                    attempt = retry
-                    break
+                return (raw, cleaned)
+            }
+
+            var triedLanguages = Set<String>()
+            var attempt = runOnce(language: preferredLanguage?.isEmpty == false ? preferredLanguage : nil)
+            if let preferredLanguage, !preferredLanguage.isEmpty {
+                triedLanguages.insert(preferredLanguage.lowercased())
+            } else {
+                triedLanguages.insert("auto")
+            }
+            if attempt.cleaned.isEmpty {
+                for fallback in ["French", "English"] {
+                    let key = fallback.lowercased()
+                    if triedLanguages.contains(key) {
+                        continue
+                    }
+                    triedLanguages.insert(key)
+                    let retry = runOnce(language: fallback)
+                    if !retry.cleaned.isEmpty {
+                        attempt = retry
+                        break
+                    }
+                    if attempt.raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        attempt = retry
+                    }
                 }
-                if attempt.raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    attempt = retry
+            }
+
+            if !attempt.cleaned.isEmpty {
+                mergedTranscripts.append(attempt.cleaned)
+            } else if rawFallback == nil {
+                let raw = attempt.raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !raw.isEmpty {
+                    rawFallback = String(raw.prefix(200))
                 }
             }
         }
 
         emit(.status("Ready"))
-        guard !attempt.cleaned.isEmpty else {
-            if !attempt.raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                throw ASRError.emptyTranscriptionRaw(String(attempt.raw.prefix(200)))
+        guard processedChunks > 0 else { throw ASRError.audioTooShort }
+
+        let mergedText = mergedTranscripts
+            .joined(separator: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedMergedText = Self.cleanTranscriptionForDisplay(mergedText)
+
+        guard !cleanedMergedText.isEmpty else {
+            if let rawFallback {
+                throw ASRError.emptyTranscriptionRaw(rawFallback)
             }
             throw ASRError.emptyTranscription
         }
-        return attempt.cleaned
+        return cleanedMergedText
     }
 
     public func transcribe(from url: URL) async throws -> String {
@@ -513,6 +555,52 @@ public actor NativeASREngine {
         return nil
     }
 
+    static func cleanTranscriptionForDisplay(_ rawText: String) -> String {
+        var text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "" }
+
+        // If the model emitted metadata then text, prefer text after the last ASR marker.
+        if let lastTagRange = text.range(
+            of: "<asr_text>",
+            options: [.regularExpression, .caseInsensitive, .backwards]
+        ) {
+            let trailing = String(text[lastTagRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trailing.isEmpty {
+                text = trailing
+            }
+        }
+
+        // Remove explicit metadata phrases still present in decoded text.
+        text = text.replacingOccurrences(
+            of: #"(?i)\blanguage\s+[^\n<]{1,40}<asr_text>"#,
+            with: " ",
+            options: .regularExpression
+        )
+
+        // Remove residual special tokens and tags.
+        text = text.replacingOccurrences(
+            of: #"<\|[^|]+?\|>"#,
+            with: " ",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: #"(?i)<asr_text>"#,
+            with: " ",
+            options: .regularExpression
+        )
+
+        // Remove standalone "language XYZ" control lines if any remain.
+        text = text.replacingOccurrences(
+            of: #"(?im)^\s*language\s+[^\n]+$"#,
+            with: " ",
+            options: .regularExpression
+        )
+
+        return text
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private static func parseASROutput(raw: String, forcedLanguage: String?) -> (language: String, text: String) {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return ("", "") }
@@ -520,7 +608,7 @@ public actor NativeASREngine {
         let asrTag = "<asr_text>"
         if let range = trimmed.range(of: asrTag) {
             let meta = String(trimmed[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-            let text = String(trimmed[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = cleanTranscriptionForDisplay(String(trimmed[range.upperBound...]))
             let lower = meta.lowercased()
             if lower.contains("language none") {
                 return ("", text)
@@ -538,7 +626,7 @@ public actor NativeASREngine {
             if language.isEmpty, let forcedLanguage {
                 language = forcedLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
             }
-            return (language, text)
+            return (language, cleanTranscriptionForDisplay(text))
         }
 
         // Fallback: no tag, treat the full decoded content as text.
@@ -562,7 +650,7 @@ public actor NativeASREngine {
                 with: "",
                 options: .regularExpression
             )
-            let text = strippedSpecials.trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = cleanTranscriptionForDisplay(strippedSpecials)
             if text.isEmpty {
                 return ("", "")
             }
@@ -570,7 +658,7 @@ public actor NativeASREngine {
             return (fallbackLanguage, text)
         }
         let fallbackLanguage = forcedLanguage?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return (fallbackLanguage, trimmed)
+        return (fallbackLanguage, cleanTranscriptionForDisplay(trimmed))
     }
 }
 

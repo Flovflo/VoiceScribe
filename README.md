@@ -10,6 +10,7 @@
 ![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-Optimized-green?style=for-the-badge)
 ![Privacy](https://img.shields.io/badge/Privacy-100%25_Local-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-purple?style=for-the-badge)
+[![Release](https://img.shields.io/github/v/release/Flovflo/VoiceScribe?display_name=tag&style=for-the-badge)](https://github.com/Flovflo/VoiceScribe/releases/latest)
 
 </div>
 
@@ -76,9 +77,17 @@ Target profile (hardware/model dependent):
 - Apple Silicon (M1/M2/M3/M4)
 - Metal Toolchain available
 
-### Download
+### Download (recommended)
 
-- Releases: [https://github.com/Flovflo/VoiceScribe/releases](https://github.com/Flovflo/VoiceScribe/releases)
+- Latest release: [Download VoiceScribe](https://github.com/Flovflo/VoiceScribe/releases/latest)
+- Direct assets page: [All releases](https://github.com/Flovflo/VoiceScribe/releases)
+
+### Install from release
+
+1. Download `VoiceScribe-<version>.dmg` from the latest release.
+2. Open the `.dmg`.
+3. Drag `VoiceScribe.app` into `Applications`.
+4. Launch `VoiceScribe` from Launchpad/Spotlight.
 
 ### Build from source
 

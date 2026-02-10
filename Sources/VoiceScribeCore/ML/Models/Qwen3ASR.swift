@@ -225,21 +225,11 @@ public class Qwen3ASR: Module {
         let replacements = min(audioTokenPositions.count, audioEmbeddings.dim(1))
         let seqLen = baseEmbeddings.dim(1)
         let hiddenSize = baseEmbeddings.dim(2)
-        let flatBase = baseEmbeddings.reshaped(seqLen, hiddenSize)
-
-        var rows = [MLXArray]()
-        rows.reserveCapacity(seqLen)
-        var nextAudio = 0
-        for tokenIndex in 0..<seqLen {
-            if nextAudio < replacements && tokenIndex == audioTokenPositions[nextAudio] {
-                rows.append(audioEmbeddings[0, nextAudio, 0...].expandedDimensions(axis: 0))
-                nextAudio += 1
-            } else {
-                rows.append(flatBase[tokenIndex, 0...].expandedDimensions(axis: 0))
-            }
+        let mergedFlat = baseEmbeddings.reshaped(seqLen, hiddenSize)
+        for i in 0..<replacements {
+            let tokenIndex = audioTokenPositions[i]
+            mergedFlat[tokenIndex, 0...] = audioEmbeddings[0, i, 0...]
         }
-
-        let mergedFlat = MLX.concatenated(rows, axis: 0)
         return mergedFlat.reshaped(1, seqLen, hiddenSize)
     }
 
@@ -294,15 +284,18 @@ public class Qwen3ASR: Module {
         logits: MLXArray,
         hardExcluded: Set<Int>
     ) -> Int {
-        let values = logits.asArray(Float.self)
-        var bestIndex = 0
-        var bestValue = -Float.greatestFiniteMagnitude
-        for (index, value) in values.enumerated() where !hardExcluded.contains(index) {
-            if value > bestValue {
-                bestValue = value
-                bestIndex = index
+        if hardExcluded.isEmpty {
+            return argMax(logits).item(Int.self)
+        }
+
+        let vocabularySize = logits.dim(0)
+        var bias = [Float](repeating: 0, count: vocabularySize)
+        for token in hardExcluded {
+            if token >= 0 && token < vocabularySize {
+                bias[token] = -1e9
             }
         }
-        return bestIndex
+        let adjusted = logits + MLXArray(bias, [vocabularySize])
+        return argMax(adjusted).item(Int.self)
     }
 }
