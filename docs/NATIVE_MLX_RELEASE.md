@@ -1,66 +1,134 @@
-# VoiceScribe Native MLX Release Notes
+# VoiceScribe Native MLX Notes
 
-Ce document decrit la migration et les garde-fous qualite pour la version native Swift + MLX.
+This document is the technical companion to the main README.
 
-## Objectif
+It explains what changed in the native MLX refactor, how the app is wired internally, how it was validated, and which limits are still open.
 
-- Supprimer le backend Python ASR.
-- Forcer l'usage du modele MLX: `mlx-community/Qwen3-ASR-1.7B-8bit`.
-- Stabiliser l'UX HUD (une seule popup, lisible, sans artefacts noirs).
-- Verrouiller la qualite avec des tests MLX, ASR, FR/EN.
+## Goals
 
-## Architecture (etat actuel)
+- remove the Python ASR daemon entirely
+- keep dictation UX unchanged
+- run speech-to-text natively in Swift on Apple Silicon
+- make packaging, debugging, and crash behavior much cleaner
 
-- `NativeASREngine` (actor) execute l'inference ASR en natif.
-- `NativeASRService` expose l'etat vers `AppState`/UI.
-- `AudioFeatureExtractor` supporte un backend MLX GPU.
-- Le modele charge est strictement valide:
-  - Collection `mlx-community/Qwen3-ASR`
-  - Variante imposee `Qwen3-ASR-1.7B-8bit`
+## What Changed
 
-## Correctifs UX/HUD inclus
+VoiceScribe now uses a native Swift ASR pipeline:
 
-- Debounce hotkey a deux niveaux:
-  - Gate temporelle (cooldown)
-  - Blocage des repeats clavier tant que la touche n'est pas relachee
-- Fenetre HUD unique:
-  - identification explicite de la fenetre HUD
-  - fermeture des doublons
-- Style HUD simplifie:
-  - contraste texte fort
-  - suppression des effets provoquant l'impression de halo noir
+- `NativeASREngine` loads Qwen3-ASR MLX model snapshots directly
+- `AudioFeatureExtractor` computes Qwen3-compatible log-mel features in Swift
+- `NativeASRService` publishes engine state to the UI
+- `AppState` coordinates loading, recording, transcription, clipboard copy, and auto-paste
 
-## Nouveaux reglages avances
+What was intentionally removed from the architecture:
 
-- **Selection modele Qwen3-ASR complete**
-  - Toutes les variantes `Qwen3-ASR` de la collection sont selectionnables en mode avance:
-    - `0.6B`: `4bit`, `5bit`, `6bit`, `8bit`, `bf16`
-    - `1.7B`: `4bit`, `5bit`, `6bit`, `8bit`, `bf16`
-  - Les variantes `Qwen3-ForcedAligner` sont volontairement exclues (pas un modele de transcription texte direct).
+- Python subprocess orchestration
+- external ASR daemon lifecycle management
+- cross-language logging and error translation
+- Python runtime packaging concerns
 
-- **Selection micro par defaut (persistante)**
-  - Le micro choisi dans les settings est memorise.
-  - A chaque enregistrement, VoiceScribe reapplique ce micro explicitement.
-  - Si le micro n'est plus disponible, l'app remonte une erreur claire au lieu de basculer silencieusement.
+## Why MLX Is A Good Fit
 
-## Validation qualite executee
+MLX is especially compelling here because VoiceScribe is a macOS-only dictation app for Apple Silicon.
 
-Build:
+Benefits in this project:
 
-```bash
-swift build
-swift build -c release --arch arm64
-```
+- Metal-backed tensor runtime without leaving the Apple stack
+- one language runtime for UI, audio, and inference
+- simpler release bundles
+- simpler crash diagnosis because there is one process, not an app plus a sidecar service
+- direct control over model validation, loading, tokenizer behavior, and fallback policy
 
-Tests unitaires/integration:
+This matters a lot for a utility app. A dictation app must feel boring, predictable, and always available.
+
+## Architecture
+
+### User flow
+
+1. `Option + Space` triggers the hotkey manager.
+2. `AppState` starts or stops recording.
+3. `AudioRecorder` captures microphone audio and resamples it to 16 kHz mono.
+4. `AudioFeatureExtractor` produces log-mel features.
+5. `NativeASREngine` runs Qwen3-ASR locally with MLX.
+6. The decoded transcript is cleaned.
+7. The transcript is copied and pasted into the active application.
+
+### Internal modules
+
+| Module | Responsibility |
+|---|---|
+| `AudioRecorder` | microphone selection, permission handling, capture, resampling |
+| `AudioFeatureExtractor` | log-mel feature extraction |
+| `MLXMelSpectrogram` | GPU feature extraction path |
+| `NativeASREngine` | model snapshot download, config validation, weight loading, inference |
+| `Qwen3ASR` / `Qwen3Audio` / `Qwen2` | local model implementation |
+| `NativeASRService` | UI-facing state wrapper |
+| `AppState` | end-to-end dictation orchestration |
+| `HotKeyManager` | hotkey registration and debounce |
+
+## Reliability Hardening In This Pass
+
+The recent hardening work focused on issues that make a desktop utility feel flaky.
+
+### Fixed
+
+- app crash on activation / AppKit callback path
+- status-item and shortcut becoming unusable because the app process had crashed
+- preferred microphone startup failure leaving the user stuck on `No audio`
+- model-selection errors being swallowed instead of surfacing deterministically
+- app shutdown leaving recorder or engine state dirty
+- release test builds missing the hotkey test hook
+
+### Behavioral changes
+
+- AppKit entry points are now safely re-hopped to the main actor
+- if a selected microphone fails, VoiceScribe retries with the system default microphone
+- model-selection failures now reliably update `lastError` and `AppState.errorMessage`
+- shutdown explicitly resets transient state
+
+## Validation Matrix
+
+The following validations were run during the refactor on April 3, 2026.
+
+### Core build and tests
 
 ```bash
 swift test
-VOICESCRIBE_RUN_MLX_TESTS=1 swift test --filter AudioFeatureTests
-VOICESCRIBE_RUN_ASR_TESTS=1 swift test --filter NativeEngineTests
+swift build -c release --arch arm64
 ```
 
-Tests ASR FR/EN avec mots-cles obligatoires:
+Status:
+
+- passed
+
+### MLX feature validation
+
+```bash
+VOICESCRIBE_RUN_MLX_TESTS=1 swift test --filter AudioFeatureTests
+```
+
+Status:
+
+- passed
+
+Coverage:
+
+- MLX feature extraction shape
+- MLX vs CPU feature parity
+
+### Real model load and inference
+
+```bash
+VOICESCRIBE_RUN_ASR_TESTS=1 swift test --filter NativeEngineTests/testModelLoadingAndBasicInference
+```
+
+Status:
+
+- passed
+
+### Real sample-audio transcription
+
+French:
 
 ```bash
 say -v Thomas "bonjour ceci est un test de transcription rapide" -o /tmp/voicescribe_fr.aiff
@@ -69,7 +137,11 @@ VOICESCRIBE_RUN_ASR_TESTS=1 \
 VOICESCRIBE_TEST_AUDIO=/tmp/voicescribe_fr.wav \
 VOICESCRIBE_EXPECT_KEYWORDS='bonjour,test' \
 swift test --filter NativeEngineTests/testTranscriptionWithSampleAudio
+```
 
+English:
+
+```bash
 say -v Samantha "hello this is a fast speech transcription quality check" -o /tmp/voicescribe_en.aiff
 afconvert -f WAVE -d LEI16@16000 /tmp/voicescribe_en.aiff /tmp/voicescribe_en.wav
 VOICESCRIBE_RUN_ASR_TESTS=1 \
@@ -78,23 +150,61 @@ VOICESCRIBE_EXPECT_KEYWORDS='hello,transcription' \
 swift test --filter NativeEngineTests/testTranscriptionWithSampleAudio
 ```
 
-## Troubleshooting rapide
+Status:
 
-- Si la transcription degenerate ("AAA...", texte vide):
-  - verifier le modele charge en settings: `mlx-community/Qwen3-ASR-1.7B-8bit`
-  - purger le cache modele puis relancer
-  - relancer les tests FR/EN ci-dessus
-- Si plusieurs popups apparaissent:
-  - fermer toutes les instances VoiceScribe
-  - relancer la derniere build uniquement
-- Si MLX GPU n'est pas actif:
-  - verifier metallib et environnement GPU
-  - lancer `VOICESCRIBE_RUN_MLX_TESTS=1 swift test --filter AudioFeatureTests/testMLXvsAccelerateParity`
+- passed in both languages
 
-## Fichiers cles
+## Performance Status
 
-- `Sources/VoiceScribe/VoiceScribeApp.swift`
-- `Sources/VoiceScribeCore/Utils/HotKeyManager.swift`
-- `Sources/VoiceScribeCore/ML/NativeASREngine.swift`
-- `Tests/VoiceScribeTests/VoiceScribeTests.swift`
-- `Tests/VoiceScribeTests/NativeEngineTests.swift`
+The project includes an explicit benchmark:
+
+```bash
+VOICESCRIBE_RUN_ASR_BENCH=1 swift test -c release --filter NativeEngineTests/testASRBenchmark
+```
+
+Current honest status:
+
+- the benchmark is useful and should stay in the repository
+- on the validation machine used in this pass, it did not yet meet the current `1000 ms` threshold
+- measured release performance remained roughly around `1330 ms` for the synthetic 10-second benchmark clip
+
+Interpretation:
+
+- functional quality is validated
+- MLX runtime is working correctly
+- performance optimization is still an open engineering task
+
+The app should not claim the stricter target until the benchmark gate is green.
+
+## Packaging Notes
+
+Use:
+
+```bash
+./package_app.sh
+```
+
+The packaging flow:
+
+- builds the release binary
+- bundles MLX metallib assets into the app
+- generates `Info.plist`
+- builds the app icon
+- signs the bundle ad hoc by default
+
+Installed app path:
+
+- `/Applications/VoiceScribe.app`
+
+## Known Limits
+
+- the synthetic ASR benchmark gate is still above target
+- first model load is naturally slower because weights must be downloaded and cached
+- real-world latency depends on model size, microphone quality, and Apple Silicon generation
+
+## Recommended Next Work
+
+1. profile the release benchmark path with cached weights and warm kernels
+2. reduce avoidable re-decode work in the benchmark path
+3. measure chunking overhead on short vs long clips
+4. add a repeatable release benchmark report artifact for every performance pass

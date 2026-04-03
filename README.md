@@ -1,185 +1,248 @@
 # VoiceScribe
 
-<div align="center">
+VoiceScribe is a local dictation app for macOS built around a native Swift 6 + MLX speech-to-text pipeline.
 
-### The local voice-to-text app for Mac: fast, private, native.
-<img width="535" height="145" alt="image" src="https://github.com/user-attachments/assets/a84ca1ec-492d-4ae3-9f3e-cb097ae9353f" />
+Press `Option + Space`, speak, press it again, and VoiceScribe transcribes locally on Apple Silicon, copies the text, and pastes it back at the cursor.
 
+![VoiceScribe HUD](assets/screenshot.png)
 
-*Press one shortcut, speak, and text appears directly at your cursor.*
+## Why VoiceScribe
 
-![macOS](https://img.shields.io/badge/macOS-14.0+-000000?style=for-the-badge&logo=apple)
-![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-Optimized-green?style=for-the-badge)
-![Privacy](https://img.shields.io/badge/Privacy-100%25_Local-blue?style=for-the-badge)
-![License](https://img.shields.io/badge/license-MIT-purple?style=for-the-badge)
-[![Release](https://img.shields.io/github/v/release/Flovflo/VoiceScribe?display_name=tag&style=for-the-badge)](https://github.com/Flovflo/VoiceScribe/releases/latest)
+- Fully local speech-to-text on macOS
+- Native Swift app, no Python daemon, no subprocess bridge
+- Qwen3-ASR models running on MLX / Metal
+- Floating HUD with one-hotkey dictation flow
+- Automatic clipboard copy and text injection
+- Multilingual dictation with strong English and French behavior
 
-</div>
+## Why Native Swift + MLX Matters
 
----
+The point of this project is not just "offline ASR". It is removing the usual packaging and reliability problems that come with hybrid desktop ML apps.
 
-## Why install VoiceScribe
+With a native Swift + MLX stack:
 
-VoiceScribe is designed for real daily dictation with minimal friction:
+- the app ships as one normal macOS app instead of an app plus a hidden Python runtime
+- model loading, progress, errors, and cancellation stay inside one concurrency model
+- audio capture, feature extraction, inference, UI, and paste flow are easier to debug end to end
+- Metal acceleration is used directly through MLX on Apple Silicon
+- release packaging is simpler because there is no external ASR service to spawn, supervise, or crash separately
 
-- One shortcut: `Option + Space`
-- Floating HUD while recording
-- Automatic text injection at the cursor
-- 100% local ASR with native Swift + MLX
-- No Python runtime and no external daemon
+In practice this means fewer moving parts, less installation friction, and a much cleaner crash surface.
 
----
+## How It Works
 
-## VoiceScribe vs Superwhisper
+At a high level, VoiceScribe does four things:
 
-Superwhisper is a strong product. VoiceScribe is built for users who specifically want a fully native Swift + MLX ASR pipeline with direct control over Qwen3-ASR variants.
+1. capture microphone audio on macOS
+2. convert it into log-mel features
+3. run Qwen3-ASR locally with MLX
+4. inject the cleaned transcript back into the active app
 
-| Point | VoiceScribe | Superwhisper |
-|------|-------------|--------------|
-| Inference stack | Native Swift 6 + `MLX` / `MLXNN` | Depends on app and configuration |
-| Model family | `mlx-community/Qwen3-ASR` (0.6B/1.7B, 4bit->bf16) | Depends on selected provider/model |
-| Privacy mode | Fully local transcription | Varies by mode |
-| Developer transparency | Open source, auditable pipeline | Product-specific |
-| Dictation workflow | Built-in hotkey + auto-paste | Product-specific |
+```mermaid
+flowchart LR
+    A["Option + Space"] --> B["AudioRecorder"]
+    B --> C["AudioFeatureExtractor"]
+    C --> D["NativeASREngine"]
+    D --> E["Qwen3 audio encoder"]
+    E --> F["Qwen3 language decoder"]
+    F --> G["Transcript cleanup"]
+    G --> H["Clipboard + paste injection"]
+    D -. status / progress .-> I["AppState + HUD"]
+```
 
-### Why Qwen3-ASR matters
+## Runtime Architecture
 
-VoiceScribe uses Qwen3-ASR on MLX. On Apple Silicon, this combination is especially strong for:
+Core pieces:
 
-- fast speech
-- multilingual dictation (especially EN/FR)
-- reduced degraded outputs (token artifacts and repetitions)
+- `AudioRecorder`
+  Captures microphone input, tracks level, resamples to 16 kHz mono, and retries with the system default microphone if the preferred input fails.
+- `AudioFeatureExtractor`
+  Converts raw audio into Qwen3-compatible log-mel features. CPU and MLX GPU backends are both available.
+- `NativeASREngine`
+  Actor-based ASR runtime. Downloads model snapshots, validates configs and weights, loads tokenizer assets, and runs transcription chunk by chunk.
+- `NativeASRService`
+  MainActor wrapper that exposes status, progress, and readiness to SwiftUI.
+- `AppState`
+  Coordinates the end-to-end dictation flow: recording, model loading, transcription, clipboard copy, and auto-paste.
 
-The result is cleaner text and a better real-time speak-to-type workflow.
+Key design choices:
 
----
+- strict model allow-list for `mlx-community/Qwen3-ASR` variants only
+- no Python, no shell-based inference, no external ASR daemon
+- actor / MainActor separation for model runtime vs UI state
+- explicit model cache under `~/Library/Caches/VoiceScribe/models/`
+- release bundle includes MLX metallib so the app can run as a normal `.app`
 
-## Performance profile
+## Supported Models
 
-Native local architecture:
+VoiceScribe currently supports only Qwen3-ASR MLX models:
 
-- Engine: `NativeASREngine` (Swift actor)
-- Audio features: mel/log-mel extraction in Swift (`AudioFeatureExtractor`)
-- GPU path: MLX by default (CPU fallback via environment variable)
-- Model cache: `~/Library/Caches/VoiceScribe/models/`
+- `mlx-community/Qwen3-ASR-0.6B-{4bit,5bit,6bit,8bit,bf16}`
+- `mlx-community/Qwen3-ASR-1.7B-{4bit,5bit,6bit,8bit,bf16}`
 
-Target profile (hardware/model dependent):
+Default:
 
-- fast cold start after model download
-- sub-second inference for short dictation segments
-- no Python bridge overhead
+- `mlx-community/Qwen3-ASR-1.7B-8bit`
 
----
+Why this default:
+
+- best balance of quality and simplicity
+- strong multilingual dictation behavior
+- stable validation path in this repository
 
 ## Installation
 
 ### Requirements
 
-- macOS 14+
-- Apple Silicon (M1/M2/M3/M4)
-- Metal Toolchain available
+- macOS 14 or newer
+- Apple Silicon
+- microphone permission
+- accessibility permission if you want automatic paste into other apps
 
-### Download (recommended)
+### Download
 
-- Latest release: [Download VoiceScribe](https://github.com/Flovflo/VoiceScribe/releases/latest)
-- Direct assets page: [All releases](https://github.com/Flovflo/VoiceScribe/releases)
+- Latest release: [GitHub Releases](https://github.com/Flovflo/VoiceScribe/releases/latest)
 
-### Install from release
-
-1. Download `VoiceScribe-<version>.dmg` from the latest release.
-2. Open the `.dmg`.
-3. Drag `VoiceScribe.app` into `Applications`.
-4. Launch `VoiceScribe` from Launchpad/Spotlight.
-
-### Build from source
+### Build From Source
 
 ```bash
 git clone https://github.com/Flovflo/VoiceScribe.git
 cd VoiceScribe
 
-swift build -c release
-./bundle_app.sh
+swift build -c release --arch arm64
+./package_app.sh
 open VoiceScribe.app
 ```
 
-If needed:
+The packaging script bundles:
 
-```bash
-xcodebuild -downloadComponent MetalToolchain
-```
-
-On first launch, VoiceScribe downloads the selected Qwen3-ASR model snapshot from Hugging Face.
-
----
+- the release binary
+- the app icon
+- `Info.plist`
+- the MLX `default.metallib` runtime asset
 
 ## Usage
 
-`Option + Space`
+1. Launch VoiceScribe.
+2. Wait for the model to finish loading on first run.
+3. Press `Option + Space` to start recording.
+4. Speak normally.
+5. Press `Option + Space` again to stop.
+6. The transcript is copied and pasted into the currently focused app.
 
-1. Press once to start recording.
-2. Speak.
-3. Press again to stop.
-4. VoiceScribe transcribes and injects text at your cursor.
+The first run may take longer because the selected Qwen3-ASR model is downloaded and cached locally.
 
----
+## Validation And Test Coverage
 
-## Supported models
+This repository includes three useful validation layers.
 
-Supported ASR variants (Qwen3-ASR only):
+### 1. Fast default suite
 
-- `mlx-community/Qwen3-ASR-0.6B-{4bit,5bit,6bit,8bit,bf16}`
-- `mlx-community/Qwen3-ASR-1.7B-{4bit,5bit,6bit,8bit,bf16}`
+```bash
+swift test
+```
 
-Default model:
+Covers:
 
-- `mlx-community/Qwen3-ASR-1.7B-8bit`
+- audio feature extraction
+- app state behavior
+- hotkey debounce logic
+- model allow-list and error handling
+- transcription cleanup helpers
 
----
+### 2. MLX feature tests
 
-## Privacy
+```bash
+VOICESCRIBE_RUN_MLX_TESTS=1 swift test --filter AudioFeatureTests
+```
 
-Your voice data stays on your machine during transcription.
+Covers:
 
-- no required cloud API
-- no telemetry pipeline in the core transcription path
-- open-source codebase for auditability
+- MLX feature extraction shape
+- parity between CPU and MLX feature pipelines
 
----
+### 3. Real ASR integration tests
 
-## Pricing
+```bash
+VOICESCRIBE_RUN_ASR_TESTS=1 swift test --filter NativeEngineTests
+```
 
-Free.
+Covers:
 
----
+- real model loading
+- real inference execution
+- sample-audio transcription checks
 
-## Development and validation
+Sample English and French validations can be run with generated audio:
+
+```bash
+say -v Thomas "bonjour ceci est un test de transcription rapide" -o /tmp/voicescribe_fr.aiff
+afconvert -f WAVE -d LEI16@16000 /tmp/voicescribe_fr.aiff /tmp/voicescribe_fr.wav
+VOICESCRIBE_RUN_ASR_TESTS=1 \
+VOICESCRIBE_TEST_AUDIO=/tmp/voicescribe_fr.wav \
+VOICESCRIBE_EXPECT_KEYWORDS='bonjour,test' \
+swift test --filter NativeEngineTests/testTranscriptionWithSampleAudio
+
+say -v Samantha "hello this is a fast speech transcription quality check" -o /tmp/voicescribe_en.aiff
+afconvert -f WAVE -d LEI16@16000 /tmp/voicescribe_en.aiff /tmp/voicescribe_en.wav
+VOICESCRIBE_RUN_ASR_TESTS=1 \
+VOICESCRIBE_TEST_AUDIO=/tmp/voicescribe_en.wav \
+VOICESCRIBE_EXPECT_KEYWORDS='hello,transcription' \
+swift test --filter NativeEngineTests/testTranscriptionWithSampleAudio
+```
+
+## Performance Notes
+
+VoiceScribe is designed to feel fast in interactive dictation, but the repository is honest about what is validated versus what is still being optimized.
+
+Current state of the included benchmark harness:
+
+- the strict 10-second synthetic benchmark exists in `NativeEngineTests`
+- on the validation machine used in this refactor, the release benchmark was still above the current `1000 ms` gate
+- stability and correctness are in a good place
+- performance optimization remains an open follow-up area
+
+That means:
+
+- VoiceScribe is already usable and validated end to end
+- the performance target is a goal, not something this README claims as universally achieved today
+
+## Troubleshooting
+
+### "No audio"
+
+VoiceScribe now retries with the system default microphone if the preferred microphone fails to start. If recording still fails:
+
+- open Settings and reselect the input device
+- confirm macOS microphone permission is granted
+- disconnect and reconnect problematic USB or Bluetooth microphones
+
+### The shortcut does nothing
+
+- confirm the app is still running in the menu bar
+- relaunch the app once after first install
+- check that another utility is not already consuming `Option + Space`
+
+### The app loads but transcription is empty
+
+- verify the selected model is a Qwen3-ASR variant
+- let the initial model download finish completely
+- rerun the English or French sample tests from the validation section
+
+## Development Notes
+
+Helpful docs:
+
+- [Native MLX notes](docs/NATIVE_MLX_RELEASE.md)
+- [`AGENTS.md`](AGENTS.md)
 
 Core stack:
 
 - Swift 6
 - SwiftUI + AppKit
-- MLX Swift (`MLX`, `MLXNN`)
-- Hugging Face `swift-transformers` (tokenizer runtime)
-
-Validation commands:
-
-```bash
-swift test
-VOICESCRIBE_RUN_MLX_TESTS=1 swift test --filter AudioFeatureTests
-VOICESCRIBE_RUN_ASR_TESTS=1 swift test --filter NativeEngineTests
-```
-
-Optional ASR benchmark:
-
-```bash
-VOICESCRIBE_RUN_ASR_BENCH=1 swift test --filter NativeEngineTests/testASRBenchmark
-```
-
-Native MLX migration notes:
-
-- `docs/NATIVE_MLX_RELEASE.md`
-
----
+- MLX
+- MLXNN
+- Hugging Face `swift-transformers`
 
 ## License
 
