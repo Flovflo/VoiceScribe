@@ -2,6 +2,10 @@
 .build/
 VoiceScribe.app/
 VoiceScribe-v*.tar.gz
+*.tar.gz
+*.tgz
+*.dmg
+*.icns
 dist/
 facts
 *.xcodeproj

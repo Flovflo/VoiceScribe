@@ -4,7 +4,15 @@ VoiceScribe is a local dictation app for macOS built around a native Swift 6 + M
 
 Press `Option + Space`, speak, press it again, and VoiceScribe transcribes locally on Apple Silicon, copies the text, and pastes it back at the cursor.
 
-![VoiceScribe HUD](assets/screenshot.png)
+It is meant to feel like a real Mac utility, not a wrapped demo: one hotkey, one floating HUD, one local model runtime, no Python sidecar.
+
+## Screenshots
+
+Real captures from the current macOS app:
+
+| Ready | Recording |
+|---|---|
+| ![VoiceScribe HUD ready](assets/readme-hud-ready.png) | ![VoiceScribe HUD recording](assets/readme-hud-recording.png) |
 
 ## Why VoiceScribe
 
