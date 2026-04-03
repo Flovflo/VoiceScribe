@@ -1,6 +1,6 @@
 # VoiceScribe
 
-Local AI dictation for macOS.
+Fast local AI dictation for macOS, powered by Qwen3-ASR.
 
 Press `Option + Space`, speak, press it again, and VoiceScribe pastes clean text back into the app you are using.
 
@@ -14,6 +14,16 @@ VoiceScribe is built for people who want a real offline speech-to-text app for M
 - One hotkey, one floating HUD, one fast dictation flow
 - Automatic clipboard copy and paste injection
 - Strong English and French dictation
+
+## Why Qwen3-ASR
+
+Qwen3-ASR is the core reason VoiceScribe feels competitive as a local dictation app on Apple Silicon.
+
+- fast enough for real short-form dictation workflows
+- strong quality-to-latency balance in local use
+- better multilingual behavior for English and French
+- fewer weird artifacts than many offline speech-to-text stacks
+- a good fit for MLX + Metal on Mac
 
 ## Screenshots
 
@@ -96,6 +106,14 @@ VOICESCRIBE_RUN_ASR_TESTS=1 swift test --filter NativeEngineTests
 ```
 
 ## Performance
+
+VoiceScribe is optimized for interactive dictation, not just offline batch transcription.
+
+The default `Qwen3-ASR-1.7B-8bit` model is used because it gives the best current balance of:
+
+- transcription quality
+- responsiveness on Apple Silicon
+- manageable local memory use
 
 VoiceScribe is already validated end to end for local dictation, but the strict synthetic benchmark target is still being improved. The project is intentionally honest about that.
 
