@@ -46,13 +46,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    nonisolated func applicationDidFinishLaunching(_ notification: Notification) {
         // Keep this menu-bar/HUD style app alive even when no standard window is visible.
         ProcessInfo.processInfo.disableAutomaticTermination("VoiceScribe background service")
         ProcessInfo.processInfo.disableSuddenTermination()
-        
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                self.finishLaunchingOnMain()
+            }
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                MainActor.assumeIsolated {
+                    self.finishLaunchingOnMain()
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func finishLaunchingOnMain() {
         setupStatusItem()
-        
+
         // Register Option+Space
         HotKeyManager.shared.register(keyCode: 49, modifiers: 2048)
         HotKeyManager.shared.onTrigger = { [weak self] in
@@ -63,23 +78,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Wait for SwiftUI WindowGroup window, then attach HUD behavior to it.
         DispatchQueue.main.async { [weak self] in
-            _ = self?.attachMainWindowIfNeeded()
+            guard let self else { return }
+            MainActor.assumeIsolated {
+                _ = self.attachMainWindowIfNeeded()
+            }
         }
 
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(handleAppDidBecomeActive),
+            selector: #selector(handleAppDidBecomeActiveNotification(_:)),
             name: NSApplication.didBecomeActiveNotification,
             object: nil
         )
     }
 
-    @objc private func handleAppDidBecomeActive() {
+    @objc nonisolated private func handleAppDidBecomeActiveNotification(_ notification: Notification) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                self.handleAppDidBecomeActive()
+            }
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                MainActor.assumeIsolated {
+                    self.handleAppDidBecomeActive()
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func handleAppDidBecomeActive() {
         guard let window = attachMainWindowIfNeeded() else { return }
         collapseDuplicateHUDWindows(keeping: window)
         window.level = .floating
     }
 
+    @MainActor
     @discardableResult
     private func attachMainWindowIfNeeded() -> NSWindow? {
         if let existing = floatWindow {
@@ -103,6 +138,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return window
     }
 
+    @MainActor
     private func findHUDWindows() -> [NSWindow] {
         let candidates = NSApplication.shared.windows.filter { window in
             window != onboardingWindow && window != settingsWindow
@@ -124,6 +160,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return candidates
     }
 
+    @MainActor
     private func collapseDuplicateHUDWindows(keeping primary: NSWindow) {
         for window in findHUDWindows() where window != primary {
             window.orderOut(nil)
@@ -135,12 +172,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        NotificationCenter.default.removeObserver(self)
-        ProcessInfo.processInfo.enableAutomaticTermination("VoiceScribe background service")
-        ProcessInfo.processInfo.enableSuddenTermination()
+    nonisolated func applicationWillTerminate(_ notification: Notification) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                NotificationCenter.default.removeObserver(self)
+                AppState.shared.shutdown()
+                ProcessInfo.processInfo.enableAutomaticTermination("VoiceScribe background service")
+                ProcessInfo.processInfo.enableSuddenTermination()
+            }
+        } else {
+            DispatchQueue.main.sync {
+                MainActor.assumeIsolated {
+                    NotificationCenter.default.removeObserver(self)
+                    AppState.shared.shutdown()
+                    ProcessInfo.processInfo.enableAutomaticTermination("VoiceScribe background service")
+                    ProcessInfo.processInfo.enableSuddenTermination()
+                }
+            }
+        }
     }
     
+    @MainActor
     func showOnboarding() {
         if onboardingWindow == nil {
             let onboardingView = NSHostingView(rootView: OnboardingView())
@@ -165,6 +217,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
     
+    @MainActor
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
@@ -174,15 +227,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Show HUD & Record", action: #selector(toggleApp), keyEquivalent: "r"))
+        menu.addItem(NSMenuItem(title: "Show HUD & Record", action: #selector(toggleAppAction(_:)), keyEquivalent: "r"))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
+        menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettingsAction(_:)), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit VoiceScribe", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         
         statusItem?.menu = menu
     }
     
+    @MainActor
     func configureWindow(_ window: NSWindow) {
         window.identifier = Self.hudWindowIdentifier
         window.isOpaque = false
@@ -213,8 +267,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
     }
-    
-    @objc func toggleApp() {
+
+    @objc nonisolated private func toggleAppAction(_ sender: Any?) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                self.toggleApp()
+            }
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                MainActor.assumeIsolated {
+                    self.toggleApp()
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func toggleApp() {
         let now = ProcessInfo.processInfo.systemUptime
         guard !isToggleInFlight else { return }
         guard (now - lastToggleUptime) >= toggleCooldown else { return }
@@ -244,7 +314,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         appState.toggleRecording()
     }
 
-    @objc func openSettings() {
+    @objc nonisolated private func openSettingsAction(_ sender: Any?) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                self.openSettings()
+            }
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                MainActor.assumeIsolated {
+                    self.openSettings()
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func openSettings() {
         if settingsWindow == nil {
             let contentView = NSHostingView(rootView: SettingsView())
             let window = NSWindow(

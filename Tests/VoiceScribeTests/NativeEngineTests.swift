@@ -15,6 +15,15 @@ final class NativeEngineTests: XCTestCase {
         XCTAssertEqual(cleaned, "bonjour")
     }
 
+    func testLanguageFallbackRetriesAreSkippedForFullyEmptyRawOutput() {
+        XCTAssertFalse(NativeASREngine.shouldRetryLanguageFallbacks(raw: " \n\t "))
+    }
+
+    func testLanguageFallbackRetriesRemainEnabledForMetadataOnlyRawOutput() {
+        XCTAssertTrue(NativeASREngine.shouldRetryLanguageFallbacks(raw: "language French<asr_text>"))
+        XCTAssertTrue(NativeASREngine.shouldRetryLanguageFallbacks(raw: "<|im_start|>assistant"))
+    }
+
     func testRejectsUnsupportedModelOutsideQwen3Collection() async throws {
         let engine = NativeASREngine(
             config: .init(modelName: "mlx-community/Llama-3.2-1B-Instruct-4bit")

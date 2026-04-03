@@ -59,30 +59,40 @@ final class AudioCaptureEngine: @unchecked Sendable {
         } else {
             previousDefaultInputDeviceID = nil
         }
-        
+
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-        
-        guard format.sampleRate > 0 && format.channelCount > 0 else {
-            throw AudioRecorderError.engineSetupFailed("No audio input")
-        }
-        
-        sampleRate = format.sampleRate
-        self.engine = engine
-        
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-            self?.handleBuffer(buffer)
-        }
-        
         do {
+            let format = inputNode.outputFormat(forBus: 0)
+
+            guard format.sampleRate > 0 && format.channelCount > 0 else {
+                throw AudioRecorderError.engineSetupFailed("No audio input")
+            }
+
+            sampleRate = format.sampleRate
+            self.engine = engine
+
+            inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+                self?.handleBuffer(buffer)
+            }
+
             try engine.start()
+            isCapturing = true
         } catch {
             inputNode.removeTap(onBus: 0)
+            engine.stop()
             self.engine = nil
+            isCapturing = false
+            if let previousDefaultInputDeviceID {
+                _ = Self.setDefaultInputDevice(previousDefaultInputDeviceID)
+                self.previousDefaultInputDeviceID = nil
+            }
+            if let recorderError = error as? AudioRecorderError {
+                throw recorderError
+            }
             throw AudioRecorderError.engineStartFailed(error)
         }
-        isCapturing = true
+
     }
     
     private func handleBuffer(_ buffer: AVAudioPCMBuffer) {
@@ -219,8 +229,17 @@ public class AudioRecorder: ObservableObject {
             refreshInputDevices()
             throw AudioRecorderError.engineSetupFailed("Selected microphone is unavailable")
         }
+        do {
+            try captureEngine.start(preferredDeviceID: preferredDeviceID)
+        } catch {
+            let shouldRetryWithSystemDefault = (preferredDeviceID != nil)
+            guard shouldRetryWithSystemDefault else {
+                throw error
+            }
 
-        try captureEngine.start(preferredDeviceID: preferredDeviceID)
+            logger.warning("Preferred microphone failed, retrying with system default: \(error.localizedDescription)")
+            try captureEngine.start(preferredDeviceID: nil)
+        }
         isRecording = true
         
         // Poll audio level on main thread

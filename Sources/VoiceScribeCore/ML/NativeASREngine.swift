@@ -103,16 +103,17 @@ public actor NativeASREngine {
 
     // MARK: - Public API
 
-    public func setModel(_ name: String) async {
+    public func setModel(_ name: String) async throws {
         guard name != modelName else { return }
         guard Self.isAllowedModel(name) else {
-            emit(.error(ASRError.unsupportedModel(name).localizedDescription))
-            emit(.status("Error: \(ASRError.unsupportedModel(name).localizedDescription)"))
-            return
+            let error = ASRError.unsupportedModel(name)
+            emit(.error(error.localizedDescription))
+            emit(.status("Error: \(error.localizedDescription)"))
+            throw error
         }
         modelName = name
         shutdown()
-        try? await loadModel()
+        try await loadModel()
     }
 
     public func loadModel() async throws {
@@ -376,7 +377,7 @@ public actor NativeASREngine {
             } else {
                 triedLanguages.insert("auto")
             }
-            if attempt.cleaned.isEmpty {
+            if attempt.cleaned.isEmpty && Self.shouldRetryLanguageFallbacks(raw: attempt.raw) {
                 for fallback in ["French", "English"] {
                     let key = fallback.lowercased()
                     if triedLanguages.contains(key) {
@@ -659,6 +660,23 @@ public actor NativeASREngine {
         }
         let fallbackLanguage = forcedLanguage?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return (fallbackLanguage, cleanTranscriptionForDisplay(trimmed))
+    }
+
+    static func shouldRetryLanguageFallbacks(raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        if trimmed.range(of: #"(?i)\blanguage\b"#, options: .regularExpression) != nil {
+            return true
+        }
+        if trimmed.range(of: #"(?i)<asr_text>"#, options: .regularExpression) != nil {
+            return true
+        }
+        if trimmed.range(of: #"<\|[^|]+?\|>"#, options: .regularExpression) != nil {
+            return true
+        }
+
+        return false
     }
 }
 

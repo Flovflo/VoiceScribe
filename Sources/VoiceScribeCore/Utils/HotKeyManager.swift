@@ -120,11 +120,10 @@ public final class HotKeyManager: @unchecked Sendable {
         }
     }
 
-    #if DEBUG
-    public func __test_handleHotKeyEvent(kind: UInt32, now: TimeInterval) {
+    // Test hook kept available in release test builds as well.
+    func __test_handleHotKeyEvent(kind: UInt32, now: TimeInterval) {
         handleHotKeyEvent(kind: kind, now: now)
     }
-    #endif
 
     nonisolated private static func deliverHotKeyEvent(kind: UInt32) {
         if Thread.isMainThread {

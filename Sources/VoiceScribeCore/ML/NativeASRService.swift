@@ -30,11 +30,12 @@ public final class NativeASRService: ObservableObject {
 
     // MARK: - Public API
 
-    public func loadModel() async {
+    public func loadModel() async throws {
         do {
             try await engine.loadModel()
         } catch {
             lastError = error.localizedDescription
+            throw error
         }
     }
 
@@ -48,15 +49,28 @@ public final class NativeASRService: ObservableObject {
 
     public func setModel(_ name: String) {
         Task {
-            await engine.setModel(name)
+            do {
+                try await engine.setModel(name)
+            } catch {
+                lastError = error.localizedDescription
+            }
         }
     }
 
-    public func setModelAndWait(_ name: String) async {
-        await engine.setModel(name)
+    public func setModelAndWait(_ name: String) async throws {
+        do {
+            try await engine.setModel(name)
+        } catch {
+            lastError = error.localizedDescription
+            throw error
+        }
     }
 
     public func shutdown() {
+        status = "Shutdown"
+        isReady = false
+        isModelCached = false
+        loadProgress = 0.0
         Task {
             await engine.shutdown()
         }

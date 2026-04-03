@@ -87,22 +87,35 @@ public class AppState: ObservableObject {
 
         logger.info("🔧 initialize() called")
         status = "Loading Native ASR..."
+        errorMessage = nil
         let selectedModel = UserDefaults.standard.string(forKey: "selectedModel")
             ?? ASRModelCatalog.defaultModelID
-        if selectedModel == ASRModelCatalog.defaultModelID {
-            await engine.loadModel()
-        } else {
-            await engine.setModelAndWait(selectedModel)
-        }
-        if !isReady, let lastError = engine.lastError {
+        do {
+            if selectedModel == ASRModelCatalog.defaultModelID {
+                try await engine.loadModel()
+            } else {
+                try await engine.setModelAndWait(selectedModel)
+            }
+        } catch {
             status = "Model Error"
-            errorMessage = lastError
+            errorMessage = error.localizedDescription
         }
         logger.info("🔧 initialize() complete")
     }
 
     public func shutdown() {
         logger.info("🔧 shutdown() called")
+        if recorder.isRecording {
+            _ = recorder.stopRecording()
+        }
+        stopRequestedWhileStarting = false
+        isStartingRecording = false
+        isRecording = false
+        audioLevel = 0.0
+        isModelDownloading = false
+        downloadProgress = 0.0
+        errorMessage = nil
+        status = "Shutdown"
         engine.shutdown()
     }
     
@@ -156,6 +169,8 @@ public class AppState: ObservableObject {
         let samples = recorder.stopRecording()
         isRecording = false
         status = "Processing..."
+        errorMessage = nil
+        transcript = ""
         
         logger.info("🎙️ Got \(samples.count) samples")
         
@@ -173,6 +188,7 @@ public class AppState: ObservableObject {
                 )
                 logger.info("🎙️ Transcription result: \(text.prefix(50))...")
                 transcript = text
+                errorMessage = nil
                 
                 if !text.isEmpty {
                     // Copy to clipboard

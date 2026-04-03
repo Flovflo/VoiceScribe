@@ -61,6 +61,21 @@ final class VoiceScribeTests: XCTestCase {
         XCTAssertNil(engine.lastError, "Should have no error initially")
     }
 
+    @MainActor
+    func testNativeASRServiceSetModelAndWaitThrowsUnsupportedModel() async {
+        let engine = NativeASRService()
+
+        do {
+            try await engine.setModelAndWait("mlx-community/Llama-3.2-1B-Instruct-4bit")
+            XCTFail("Expected unsupported model error")
+        } catch ASRError.unsupportedModel(let modelName) {
+            XCTAssertEqual(modelName, "mlx-community/Llama-3.2-1B-Instruct-4bit")
+            XCTAssertEqual(engine.lastError, errorDescription(for: modelName))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testPermissionBridgeHandlesBackgroundCallback() async {
         let granted = await AudioRecorder.bridgePermissionRequest { completion in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -106,6 +121,30 @@ final class VoiceScribeTests: XCTestCase {
         
         // State should remain consistent
         XCTAssertFalse(appState.isRecording)
+    }
+
+    @MainActor
+    func testAppStateShutdownClearsTransientState() {
+        let appState = AppState()
+        appState.transcript = "stale transcript"
+        appState.status = "Loading Native ASR..."
+        appState.audioLevel = 0.8
+        appState.isRecording = true
+        appState.isModelDownloading = true
+        appState.downloadProgress = 0.42
+        appState.errorMessage = "Previous failure"
+        appState.recorder.isRecording = true
+
+        appState.shutdown()
+
+        XCTAssertEqual(appState.transcript, "stale transcript")
+        XCTAssertFalse(appState.isRecording)
+        XCTAssertEqual(appState.audioLevel, 0.0, accuracy: 0.001)
+        XCTAssertFalse(appState.isModelDownloading)
+        XCTAssertEqual(appState.downloadProgress, 0.0, accuracy: 0.001)
+        XCTAssertNil(appState.errorMessage)
+        XCTAssertEqual(appState.status, "Shutdown")
+        XCTAssertFalse(appState.recorder.isRecording)
     }
 
     func testHotKeyTriggerGateDebouncesRapidEvents() {
@@ -159,4 +198,8 @@ final class VoiceScribeTests: XCTestCase {
         XCTAssertEqual(policy.action(windowVisible: true), .toggleRecordingOnly)
         XCTAssertEqual(policy.action(windowVisible: false), .showHUDThenToggleRecording)
     }
+}
+
+private func errorDescription(for modelName: String) -> String {
+    ASRError.unsupportedModel(modelName).localizedDescription
 }
