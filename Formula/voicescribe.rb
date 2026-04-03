@@ -1,9 +1,9 @@
 class Voicescribe < Formula
   desc "Invisible AI Stenographer for macOS (MLX-powered + Qwen3-ASR)"
   homepage "https://github.com/Flovflo/VoiceScribe"
-  url "https://github.com/Flovflo/VoiceScribe/releases/download/v1.2.0/VoiceScribe-v1.2.0.tar.gz"
-  sha256 "8f58ab5b6a61696d86b88d7ee77f72518c0e81efff4529ca5593b0e9b1231219"
-  version "1.2.0"
+  url "https://github.com/Flovflo/VoiceScribe/releases/download/v1.4.0/VoiceScribe-v1.4.0.tar.gz"
+  sha256 "d8470c59f5b9a03734039816afffc86167c46f6a3ad2eb1ab8a5eb57d94e4a3d"
+  version "1.4.0"
   license "MIT"
 
   depends_on :macos
@@ -21,7 +21,7 @@ class Voicescribe < Formula
 
   def caveats
     <<~EOS
-      🎙️ VoiceScribe v1.2.0 is installed!
+      🎙️ VoiceScribe v1.4.0 is installed!
 
       To launch:
         open #{opt_prefix}/VoiceScribe.app
