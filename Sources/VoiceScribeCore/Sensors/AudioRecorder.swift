@@ -317,13 +317,16 @@ public class AudioRecorder: ObservableObject {
     }
 
     public func refreshInputDevices() {
-        let devices = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.microphone, .external],
-            mediaType: .audio,
-            position: .unspecified
-        ).devices
-            .sorted { $0.localizedName.localizedCaseInsensitiveCompare($1.localizedName) == .orderedAscending }
-            .map { AudioInputDevice(id: $0.uniqueID, name: $0.localizedName) }
+        let devices = Self.allAudioDeviceIDs()
+            .filter { Self.hasInputChannels(for: $0) }
+            .compactMap { deviceID -> AudioInputDevice? in
+                guard let uid = Self.deviceUID(for: deviceID),
+                      let name = Self.deviceName(for: deviceID) else {
+                    return nil
+                }
+                return AudioInputDevice(id: uid, name: name)
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
 
         availableInputDevices = devices
 
@@ -345,6 +348,16 @@ public class AudioRecorder: ObservableObject {
     }
 
     nonisolated private static func audioDeviceID(forUID uid: String) -> AudioDeviceID? {
+        for deviceID in allAudioDeviceIDs() {
+            if deviceUID(for: deviceID) == uid {
+                return deviceID
+            }
+        }
+
+        return nil
+    }
+
+    nonisolated private static func allAudioDeviceIDs() -> [AudioDeviceID] {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -354,22 +367,62 @@ public class AudioRecorder: ObservableObject {
         var dataSize: UInt32 = 0
         let systemObject = AudioObjectID(kAudioObjectSystemObject)
         guard AudioObjectGetPropertyDataSize(systemObject, &address, 0, nil, &dataSize) == noErr else {
-            return nil
+            return []
         }
 
         let count = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
         var devices = Array<AudioDeviceID>(repeating: 0, count: count)
         guard AudioObjectGetPropertyData(systemObject, &address, 0, nil, &dataSize, &devices) == noErr else {
+            return []
+        }
+
+        return devices
+    }
+
+    nonisolated private static func hasInputChannels(for deviceID: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioDevicePropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var dataSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &dataSize) == noErr,
+              dataSize >= MemoryLayout<AudioBufferList>.size else {
+            return false
+        }
+
+        let rawPointer = UnsafeMutableRawPointer.allocate(
+            byteCount: Int(dataSize),
+            alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { rawPointer.deallocate() }
+
+        let bufferListPointer = rawPointer.bindMemory(to: AudioBufferList.self, capacity: 1)
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &dataSize, bufferListPointer) == noErr else {
+            return false
+        }
+
+        let bufferList = UnsafeMutableAudioBufferListPointer(bufferListPointer)
+        return bufferList.contains { $0.mNumberChannels > 0 }
+    }
+
+    nonisolated private static func deviceName(for deviceID: AudioDeviceID) -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var name: CFString?
+        var dataSize = UInt32(MemoryLayout<CFString?>.size)
+        let status = withUnsafeMutablePointer(to: &name) { pointer in
+            AudioObjectGetPropertyData(deviceID, &address, 0, nil, &dataSize, pointer)
+        }
+        guard status == noErr else {
             return nil
         }
-
-        for deviceID in devices {
-            if deviceUID(for: deviceID) == uid {
-                return deviceID
-            }
-        }
-
-        return nil
+        return name as String?
     }
 
     nonisolated static func bridgePermissionRequest(

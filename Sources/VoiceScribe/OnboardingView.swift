@@ -7,9 +7,6 @@ struct OnboardingView: View {
     @AppStorage("selectedModel") private var selectedModel = ASRModelCatalog.defaultModelID
     
     @State private var currentStep = 0
-    @State private var isDownloading = false
-    @State private var downloadComplete = false
-    
     private let models = ASRModelCatalog.quickChoices
     
     var body: some View {
@@ -217,9 +214,9 @@ struct OnboardingView: View {
         if appState.isReady {
             return "Model Ready"
         } else if appState.isModelDownloading {
-            return "Downloading..."
+            return "Downloading Model"
         } else if appState.engine.isModelCached {
-            return "Loading Model"
+            return "Loading Local Model"
         } else {
             return "Preparing Model"
         }
@@ -227,9 +224,11 @@ struct OnboardingView: View {
     
     private var statusText: String {
         if appState.isReady {
-            return "Model loaded and ready to use"
+            return "The model is ready and VoiceScribe can transcribe locally."
         } else if appState.isModelDownloading {
-            return "Downloading model files..."
+            return "Downloading the model files needed for first use."
+        } else if appState.engine.isModelCached {
+            return "Model files are already on this Mac. Loading them into memory..."
         } else if appState.status.contains("Loading") {
             return "Loading model into memory..."
         } else {
@@ -336,7 +335,10 @@ struct OnboardingView: View {
     private var nextButtonText: String {
         switch currentStep {
         case 2:
-            return appState.isReady ? "Continue" : "Loading..."
+            if appState.isReady {
+                return "Continue"
+            }
+            return appState.isModelDownloading ? "Downloading..." : "Preparing..."
         case 3:
             return "Get Started"
         default:

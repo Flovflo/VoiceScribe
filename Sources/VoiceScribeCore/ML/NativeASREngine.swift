@@ -124,23 +124,25 @@ public actor NativeASREngine {
         isLoading = true
         defer { isLoading = false }
 
-        emit(.status("Loading model..."))
+        let repoId = modelName
+        let hasLocalModelFiles = Self.hasCachedModelFiles(repoId)
+
+        emit(.status(hasLocalModelFiles ? "Loading local model..." : "Preparing model download..."))
         emit(.progress(0.0))
         emit(.error(nil))
         emit(.ready(false))
-        isModelCached = false
-        emit(.cached(false))
+        isModelCached = hasLocalModelFiles
+        emit(.cached(hasLocalModelFiles))
 
         do {
             let hub = HubApi(downloadBase: try Self.cacheRoot())
-            let repoId = modelName
 
             let continuation = eventsContinuation
             let progressHandler: @Sendable (Progress, Double?) -> Void = { progress, _ in
                 continuation.yield(.progress(progress.fractionCompleted))
             }
 
-            emit(.status("Downloading model files..."))
+            emit(.status(hasLocalModelFiles ? "Using cached model files..." : "Downloading model files..."))
             let modelDir = try await hub.snapshot(
                 from: repoId,
                 matching: [
@@ -301,7 +303,7 @@ public actor NativeASREngine {
             isReady = true
             emit(.ready(true))
             emit(.progress(1.0))
-            emit(.status("Ready: \(repoId) @ \(modelDir.path)"))
+            emit(.status("Ready"))
         } catch {
             Self.logger.error("Model load error: \(error.localizedDescription)")
             isReady = false
@@ -451,6 +453,39 @@ public actor NativeASREngine {
             .appending(path: "models", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
+    }
+
+    static func hasCachedModelFiles(_ repoId: String) -> Bool {
+        guard let cacheRoot = try? cacheRoot() else {
+            return false
+        }
+
+        let modelDir = cacheRoot.appending(path: "models/\(repoId)", directoryHint: .isDirectory)
+        let fileManager = FileManager.default
+
+        let requiredFiles = [
+            "config.json",
+            "generation_config.json",
+            "preprocessor_config.json",
+            "chat_template.json"
+        ]
+
+        guard requiredFiles.allSatisfy({ fileManager.fileExists(atPath: modelDir.appending(path: $0).path) }) else {
+            return false
+        }
+
+        let hasTokenizer = fileManager.fileExists(atPath: modelDir.appending(path: "tokenizer.json").path)
+            || (
+                fileManager.fileExists(atPath: modelDir.appending(path: "vocab.json").path)
+                    && fileManager.fileExists(atPath: modelDir.appending(path: "merges.txt").path)
+                    && fileManager.fileExists(atPath: modelDir.appending(path: "tokenizer_config.json").path)
+            )
+        guard hasTokenizer else {
+            return false
+        }
+
+        let weightFiles = (try? fileManager.contentsOfDirectory(at: modelDir, includingPropertiesForKeys: nil)) ?? []
+        return weightFiles.contains(where: { $0.pathExtension == "safetensors" })
     }
 
     private static func isAllowedModel(_ name: String) -> Bool {

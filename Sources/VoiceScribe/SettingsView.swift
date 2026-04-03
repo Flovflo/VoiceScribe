@@ -102,6 +102,10 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+
+                Text("VoiceScribe only opens the microphone while a recording is in progress.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
 
             Section("Engine Status") {

@@ -86,10 +86,12 @@ public class AppState: ObservableObject {
         defer { isInitializing = false }
 
         logger.info("🔧 initialize() called")
-        status = "Loading Native ASR..."
-        errorMessage = nil
         let selectedModel = UserDefaults.standard.string(forKey: "selectedModel")
             ?? ASRModelCatalog.defaultModelID
+        status = NativeASREngine.hasCachedModelFiles(selectedModel)
+            ? "Loading local speech model..."
+            : "Preparing speech model download..."
+        errorMessage = nil
         do {
             if selectedModel == ASRModelCatalog.defaultModelID {
                 try await engine.loadModel()
