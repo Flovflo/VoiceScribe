@@ -35,6 +35,7 @@ class ClickableWindow: NSWindow {
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     static let hudWindowIdentifier = NSUserInterfaceItemIdentifier("VoiceScribeHUDWindow")
+    static let onboardingWindowIdentifier = NSUserInterfaceItemIdentifier("VoiceScribeOnboardingWindow")
 
     var floatWindow: NSWindow?
     var statusItem: NSStatusItem?
@@ -128,6 +129,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if excludedWindowIDs.contains(ObjectIdentifier(window)) {
                 continue
             }
+            if window.identifier == Self.onboardingWindowIdentifier {
+                continue
+            }
             candidates.append(window)
         }
 
@@ -175,9 +179,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     func showOnboarding() {
         if onboardingWindow == nil {
-            let onboardingView = NSHostingView(rootView: OnboardingView())
+            let onboardingView = NSHostingView(
+                rootView: OnboardingView(
+                    finishOnboarding: { [weak self] in
+                        self?.completeOnboarding()
+                    }
+                )
+            )
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 500, height: 450),
+                contentRect: NSRect(x: 0, y: 0, width: 620, height: 620),
                 styleMask: [.borderless],
                 backing: .buffered,
                 defer: false
@@ -186,7 +196,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             window.backgroundColor = .clear
             window.center()
             window.title = "Welcome to VoiceScribe"
+            window.identifier = Self.onboardingWindowIdentifier
             window.isReleasedWhenClosed = false
+            window.isMovableByWindowBackground = true
             window.contentView = onboardingView
             window.level = .floating
             window.hasShadow = true
@@ -195,6 +207,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         onboardingWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @MainActor
+    func completeOnboarding() {
+        hasCompletedOnboarding = true
+        dismissOnboardingWindows()
+
+        Task { await AppState.shared.initialize() }
+
+        if let window = attachMainWindowIfNeeded() {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            floatWindow?.makeKeyAndOrderFront(nil)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @MainActor
+    private func dismissOnboardingWindows() {
+        let candidates = NSApp.windows.filter {
+            $0 === onboardingWindow
+                || $0.identifier == Self.onboardingWindowIdentifier
+                || $0.title == "Welcome to VoiceScribe"
+        }
+
+        for window in candidates {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        onboardingWindow = nil
     }
     
     @MainActor
@@ -336,7 +379,8 @@ struct GlassView: View {
     static let hudWidth: CGFloat = 460
     static let hudHeight: CGFloat = 88
 
-    @ObservedObject var appState = AppState.shared
+    @ObservedObject private var appState = AppState.shared
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var transcriptAutoHideTask: Task<Void, Never>?
     
     private var accentColor: Color {
@@ -447,7 +491,11 @@ struct GlassView: View {
         .frame(width: Self.hudWidth, height: Self.hudHeight)
         .background(Color.clear)
         .onAppear {
-            Task { await appState.initialize() }
+            startInitializationIfNeeded()
+        }
+        .onChange(of: hasCompletedOnboarding) { _, newValue in
+            guard newValue else { return }
+            startInitializationIfNeeded()
         }
         .onChange(of: appState.transcript) { oldValue, newText in
             transcriptAutoHideTask?.cancel()
@@ -476,5 +524,10 @@ struct GlassView: View {
             transcriptAutoHideTask?.cancel()
             transcriptAutoHideTask = nil
         }
+    }
+
+    private func startInitializationIfNeeded() {
+        guard hasCompletedOnboarding else { return }
+        Task { await appState.initialize() }
     }
 }
