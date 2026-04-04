@@ -46,22 +46,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     
-    nonisolated func applicationDidFinishLaunching(_ notification: Notification) {
+    func applicationDidFinishLaunching(_ notification: Notification) {
         // Keep this menu-bar/HUD style app alive even when no standard window is visible.
         ProcessInfo.processInfo.disableAutomaticTermination("VoiceScribe background service")
         ProcessInfo.processInfo.disableSuddenTermination()
-        if Thread.isMainThread {
-            MainActor.assumeIsolated {
-                self.finishLaunchingOnMain()
-            }
-        } else {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                MainActor.assumeIsolated {
-                    self.finishLaunchingOnMain()
-                }
-            }
-        }
+        finishLaunchingOnMain()
     }
 
     @MainActor
@@ -77,11 +66,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Wait for SwiftUI WindowGroup window, then attach HUD behavior to it.
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
-            MainActor.assumeIsolated {
-                _ = self.attachMainWindowIfNeeded()
-            }
+            _ = self.attachMainWindowIfNeeded()
         }
 
         NotificationCenter.default.addObserver(
@@ -92,19 +79,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    @objc nonisolated private func handleAppDidBecomeActiveNotification(_ notification: Notification) {
-        if Thread.isMainThread {
-            MainActor.assumeIsolated {
-                self.handleAppDidBecomeActive()
-            }
-        } else {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                MainActor.assumeIsolated {
-                    self.handleAppDidBecomeActive()
-                }
-            }
-        }
+    @objc private func handleAppDidBecomeActiveNotification(_ notification: Notification) {
+        handleAppDidBecomeActive()
     }
 
     @MainActor
@@ -140,18 +116,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func findHUDWindows() -> [NSWindow] {
-        let candidates = NSApplication.shared.windows.filter { window in
-            window != onboardingWindow && window != settingsWindow
+        let excludedWindowIDs = Set(
+            [onboardingWindow, settingsWindow]
+                .compactMap { $0 }
+                .map(ObjectIdentifier.init)
+        )
+
+        var candidates: [NSWindow] = []
+        candidates.reserveCapacity(NSApplication.shared.windows.count)
+        for window in NSApplication.shared.windows {
+            if excludedWindowIDs.contains(ObjectIdentifier(window)) {
+                continue
+            }
+            candidates.append(window)
         }
 
-        let identified = candidates.filter { $0.identifier == Self.hudWindowIdentifier }
+        var identified: [NSWindow] = []
+        for window in candidates where window.identifier == Self.hudWindowIdentifier {
+            identified.append(window)
+        }
         if !identified.isEmpty {
             return identified
         }
 
-        let sized = candidates.filter { window in
-            abs(window.frame.width - GlassView.hudWidth) < 2
-                && abs(window.frame.height - GlassView.hudHeight) < 2
+        var sized: [NSWindow] = []
+        for window in candidates {
+            if abs(window.frame.width - GlassView.hudWidth) < 2
+                && abs(window.frame.height - GlassView.hudHeight) < 2 {
+                sized.append(window)
+            }
         }
         if !sized.isEmpty {
             return sized
@@ -162,7 +155,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func collapseDuplicateHUDWindows(keeping primary: NSWindow) {
-        for window in findHUDWindows() where window != primary {
+        for window in findHUDWindows() where window !== primary {
             window.orderOut(nil)
             window.close()
         }
@@ -172,24 +165,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
-    nonisolated func applicationWillTerminate(_ notification: Notification) {
-        if Thread.isMainThread {
-            MainActor.assumeIsolated {
-                NotificationCenter.default.removeObserver(self)
-                AppState.shared.shutdown()
-                ProcessInfo.processInfo.enableAutomaticTermination("VoiceScribe background service")
-                ProcessInfo.processInfo.enableSuddenTermination()
-            }
-        } else {
-            DispatchQueue.main.sync {
-                MainActor.assumeIsolated {
-                    NotificationCenter.default.removeObserver(self)
-                    AppState.shared.shutdown()
-                    ProcessInfo.processInfo.enableAutomaticTermination("VoiceScribe background service")
-                    ProcessInfo.processInfo.enableSuddenTermination()
-                }
-            }
-        }
+    func applicationWillTerminate(_ notification: Notification) {
+        NotificationCenter.default.removeObserver(self)
+        AppState.shared.shutdown()
+        ProcessInfo.processInfo.enableAutomaticTermination("VoiceScribe background service")
+        ProcessInfo.processInfo.enableSuddenTermination()
     }
     
     @MainActor
@@ -268,19 +248,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc nonisolated private func toggleAppAction(_ sender: Any?) {
-        if Thread.isMainThread {
-            MainActor.assumeIsolated {
-                self.toggleApp()
-            }
-        } else {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                MainActor.assumeIsolated {
-                    self.toggleApp()
-                }
-            }
-        }
+    @objc private func toggleAppAction(_ sender: Any?) {
+        toggleApp()
     }
 
     @MainActor
@@ -314,19 +283,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         appState.toggleRecording()
     }
 
-    @objc nonisolated private func openSettingsAction(_ sender: Any?) {
-        if Thread.isMainThread {
-            MainActor.assumeIsolated {
-                self.openSettings()
-            }
-        } else {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                MainActor.assumeIsolated {
-                    self.openSettings()
-                }
-            }
-        }
+    @objc private func openSettingsAction(_ sender: Any?) {
+        openSettings()
     }
 
     @MainActor
