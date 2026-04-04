@@ -28,7 +28,10 @@ let package = Package(
         .executableTarget(
             name: "VoiceScribe",
             dependencies: ["VoiceScribeCore"],
-            path: "Sources/VoiceScribe"
+            path: "Sources/VoiceScribe",
+            resources: [
+                .process("Resources")
+            ]
         ),
         .testTarget(
             name: "VoiceScribeTests",

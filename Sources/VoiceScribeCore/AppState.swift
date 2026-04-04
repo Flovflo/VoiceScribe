@@ -100,14 +100,15 @@ public class AppState: ObservableObject {
     
     // MARK: - Lifecycle
 
-    public func initialize() async {
+    public func initialize(modelID: String? = nil) async {
         guard !isInitializing else { return }
         guard !isReady else { return }
         isInitializing = true
         defer { isInitializing = false }
 
         logger.info("🔧 initialize() called")
-        let selectedModel = UserDefaults.standard.string(forKey: "selectedModel")
+        let selectedModel = modelID
+            ?? UserDefaults.standard.string(forKey: "selectedModel")
             ?? ASRModelCatalog.defaultModelID
         status = NativeASREngine.hasCachedModelFiles(selectedModel)
             ? "Loading local speech model..."
