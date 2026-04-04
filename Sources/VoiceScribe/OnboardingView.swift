@@ -7,6 +7,7 @@ struct OnboardingView: View {
     @AppStorage("selectedModel") private var selectedModel = ASRModelCatalog.defaultModelID
     
     @State private var currentStep = 0
+    @State private var autoAdvanceTask: Task<Void, Never>?
     private let models = ASRModelCatalog.quickChoices
     
     var body: some View {
@@ -201,12 +202,23 @@ struct OnboardingView: View {
         .onChange(of: appState.isReady) { oldValue, newValue in
             // Auto-advance when model becomes ready
             if newValue && currentStep == 2 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                autoAdvanceTask?.cancel()
+                autoAdvanceTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(500))
+                    guard !Task.isCancelled, currentStep == 2, appState.isReady else {
+                        autoAdvanceTask = nil
+                        return
+                    }
                     withAnimation(.easeInOut(duration: 0.2)) {
                         currentStep = 3
                     }
+                    autoAdvanceTask = nil
                 }
             }
+        }
+        .onDisappear {
+            autoAdvanceTask?.cancel()
+            autoAdvanceTask = nil
         }
     }
     

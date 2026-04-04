@@ -5,6 +5,25 @@ import os.log
 
 private let logger = Logger(subsystem: "com.voicescribe", category: "AudioRecorder")
 
+private final class ConverterInputState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var hasSuppliedInput = false
+    let buffer: AVAudioPCMBuffer
+
+    init(buffer: AVAudioPCMBuffer) {
+        self.buffer = buffer
+    }
+
+    func nextBuffer() -> AVAudioPCMBuffer? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard !hasSuppliedInput else { return nil }
+        hasSuppliedInput = true
+        return buffer
+    }
+}
+
 public enum AudioRecorderError: Error, LocalizedError {
     case permissionDenied
     case engineSetupFailed(String)
@@ -32,6 +51,53 @@ public struct AudioInputDevice: Identifiable, Hashable, Sendable {
     }
 }
 
+enum AudioInputRouteCandidate: Equatable, Sendable {
+    case systemDefault
+    case specific(String)
+}
+
+struct AudioInputRoutePlanner {
+    static func orderedCandidates(
+        selectedUID: String?,
+        systemDefaultUID: String?,
+        availableDevices: [AudioInputDevice]
+    ) -> [AudioInputRouteCandidate] {
+        let availableUIDs = Set(availableDevices.map(\.id))
+        var candidates: [AudioInputRouteCandidate] = []
+        var seenSpecificUIDs = Set<String>()
+        var includesSystemDefault = false
+
+        func append(_ candidate: AudioInputRouteCandidate) {
+            switch candidate {
+            case .systemDefault:
+                guard !includesSystemDefault else { return }
+                includesSystemDefault = true
+            case .specific(let uid):
+                guard seenSpecificUIDs.insert(uid).inserted else { return }
+            }
+            candidates.append(candidate)
+        }
+
+        if let selectedUID,
+           !selectedUID.isEmpty,
+           (availableUIDs.contains(selectedUID) || selectedUID == systemDefaultUID) {
+            append(.specific(selectedUID))
+        }
+
+        append(.systemDefault)
+
+        if let systemDefaultUID, !systemDefaultUID.isEmpty {
+            append(.specific(systemDefaultUID))
+        }
+
+        for device in availableDevices {
+            append(.specific(device.id))
+        }
+
+        return candidates
+    }
+}
+
 /// Non-isolated audio capture engine
 /// This class is NOT MainActor and handles all audio thread callbacks safely
 final class AudioCaptureEngine: @unchecked Sendable {
@@ -42,10 +108,12 @@ final class AudioCaptureEngine: @unchecked Sendable {
     private(set) var lastRMS: Float = 0
     private(set) var isCapturing = false
     private var previousDefaultInputDeviceID: AudioDeviceID?
+    private var hasReceivedBuffer = false
     
     func start(preferredDeviceID: AudioDeviceID?) throws {
         lock.lock()
         samples.removeAll()
+        hasReceivedBuffer = false
         lock.unlock()
 
         if let preferredDeviceID {
@@ -108,6 +176,7 @@ final class AudioCaptureEngine: @unchecked Sendable {
         lastRMS = sqrt(sum / Float(count))
         
         lock.lock()
+        hasReceivedBuffer = true
         samples.append(contentsOf: newSamples)
         lock.unlock()
     }
@@ -131,6 +200,24 @@ final class AudioCaptureEngine: @unchecked Sendable {
         samples.removeAll()
         lock.unlock()
         
+        return result
+    }
+
+    func waitForFirstBuffer(timeout: Duration) async -> Bool {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if didReceiveBuffer() {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        return didReceiveBuffer()
+    }
+
+    private func didReceiveBuffer() -> Bool {
+        lock.lock()
+        let result = hasReceivedBuffer
+        lock.unlock()
         return result
     }
 
@@ -219,27 +306,8 @@ public class AudioRecorder: ObservableObject {
         
         logger.info("Starting recording...")
 
-        let preferredDeviceID: AudioDeviceID?
-        if let uid = selectedInputDeviceUID {
-            preferredDeviceID = Self.audioDeviceID(forUID: uid)
-        } else {
-            preferredDeviceID = nil
-        }
-        if selectedInputDeviceUID != nil && preferredDeviceID == nil {
-            refreshInputDevices()
-            throw AudioRecorderError.engineSetupFailed("Selected microphone is unavailable")
-        }
-        do {
-            try captureEngine.start(preferredDeviceID: preferredDeviceID)
-        } catch {
-            let shouldRetryWithSystemDefault = (preferredDeviceID != nil)
-            guard shouldRetryWithSystemDefault else {
-                throw error
-            }
-
-            logger.warning("Preferred microphone failed, retrying with system default: \(error.localizedDescription)")
-            try captureEngine.start(preferredDeviceID: nil)
-        }
+        refreshInputDevices()
+        try await startCaptureWithFallback()
         isRecording = true
         
         // Poll audio level on main thread
@@ -253,6 +321,59 @@ public class AudioRecorder: ObservableObject {
 
         
         logger.info("Recording started")
+    }
+
+    private func startCaptureWithFallback() async throws {
+        let candidates = AudioInputRoutePlanner.orderedCandidates(
+            selectedUID: selectedInputDeviceUID,
+            systemDefaultUID: Self.defaultInputDeviceID().flatMap { Self.deviceUID(for: $0) },
+            availableDevices: availableInputDevices
+        )
+
+        var lastError: Error?
+        for candidate in candidates {
+            do {
+                try await attemptCaptureStart(using: candidate)
+                return
+            } catch {
+                lastError = error
+                logger.warning("Microphone candidate \(self.logDescription(for: candidate)) failed: \(error.localizedDescription)")
+            }
+        }
+
+        throw lastError ?? AudioRecorderError.engineSetupFailed("No working microphone input found")
+    }
+
+    private func attemptCaptureStart(using candidate: AudioInputRouteCandidate) async throws {
+        let preferredDeviceID = try preferredDeviceID(for: candidate)
+        try captureEngine.start(preferredDeviceID: preferredDeviceID)
+
+        guard await captureEngine.waitForFirstBuffer(timeout: .milliseconds(700)) else {
+            _ = captureEngine.stop()
+            throw AudioRecorderError.engineSetupFailed("Microphone produced no audio buffers")
+        }
+    }
+
+    private func preferredDeviceID(for candidate: AudioInputRouteCandidate) throws -> AudioDeviceID? {
+        switch candidate {
+        case .systemDefault:
+            return nil
+        case .specific(let uid):
+            guard let deviceID = Self.audioDeviceID(forUID: uid) else {
+                throw AudioRecorderError.engineSetupFailed("Selected microphone is unavailable")
+            }
+            return deviceID
+        }
+    }
+
+    private func logDescription(for candidate: AudioInputRouteCandidate) -> String {
+        switch candidate {
+        case .systemDefault:
+            return "system-default"
+        case .specific(let uid):
+            let deviceName = availableInputDevices.first(where: { $0.id == uid })?.name ?? uid
+            return "\"\(deviceName)\""
+        }
     }
     
     public func stopRecording() -> [Float] {
@@ -296,9 +417,14 @@ public class AudioRecorder: ObservableObject {
         let outputBuffer = AVAudioPCMBuffer(pcmFormat: destFormat, frameCapacity: capacity)!
         
         var error: NSError?
-        let inputBlock: AVAudioConverterInputBlock = { inNumPackets, outStatus in
+        let inputState = ConverterInputState(buffer: inputBuffer)
+        let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
+            guard let nextBuffer = inputState.nextBuffer() else {
+                outStatus.pointee = .endOfStream
+                return nil
+            }
             outStatus.pointee = .haveData
-            return inputBuffer
+            return nextBuffer
         }
         
         converter.convert(to: outputBuffer, error: &error, withInputFrom: inputBlock)
@@ -355,6 +481,27 @@ public class AudioRecorder: ObservableObject {
         }
 
         return nil
+    }
+
+    nonisolated private static func defaultInputDeviceID() -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var deviceID = AudioDeviceID(0)
+        var dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &deviceID
+        )
+        guard status == noErr else { return nil }
+        return deviceID
     }
 
     nonisolated private static func allAudioDeviceIDs() -> [AudioDeviceID] {

@@ -379,6 +379,7 @@ struct GlassView: View {
     static let hudHeight: CGFloat = 88
 
     @ObservedObject var appState = AppState.shared
+    @State private var transcriptAutoHideTask: Task<Void, Never>?
     
     private var accentColor: Color {
         if appState.isRecording {
@@ -488,18 +489,34 @@ struct GlassView: View {
         .frame(width: Self.hudWidth, height: Self.hudHeight)
         .background(Color.clear)
         .onAppear {
-
             Task { await appState.initialize() }
         }
         .onChange(of: appState.transcript) { oldValue, newText in
-            if !newText.isEmpty && !appState.isRecording {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    for window in NSApp.windows where window.identifier == AppDelegate.hudWindowIdentifier {
-                        window.orderOut(nil)
-                    }
-                    appState.clearTranscript()
-                }
+            transcriptAutoHideTask?.cancel()
+            guard !newText.isEmpty, !appState.isRecording else {
+                transcriptAutoHideTask = nil
+                return
             }
+
+            transcriptAutoHideTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.5))
+                guard !Task.isCancelled,
+                      !appState.isRecording,
+                      appState.transcript == newText else {
+                    transcriptAutoHideTask = nil
+                    return
+                }
+
+                for window in NSApp.windows where window.identifier == AppDelegate.hudWindowIdentifier {
+                    window.orderOut(nil)
+                }
+                appState.clearTranscript()
+                transcriptAutoHideTask = nil
+            }
+        }
+        .onDisappear {
+            transcriptAutoHideTask?.cancel()
+            transcriptAutoHideTask = nil
         }
     }
 }

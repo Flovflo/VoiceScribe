@@ -49,6 +49,76 @@ final class VoiceScribeTests: XCTestCase {
         XCTAssertTrue(samples.isEmpty, "Should return empty buffer if never started")
         XCTAssertFalse(recorder.isRecording)
     }
+
+    func testAudioInputRoutePlannerPrefersSelectedThenSystemDefaultThenFallbacks() {
+        let devices = [
+            AudioInputDevice(id: "built-in", name: "MacBook Pro Microphone"),
+            AudioInputDevice(id: "airpods", name: "Florian AirPods"),
+            AudioInputDevice(id: "usb", name: "USB Microphone")
+        ]
+
+        let candidates = AudioInputRoutePlanner.orderedCandidates(
+            selectedUID: "airpods",
+            systemDefaultUID: "airpods",
+            availableDevices: devices
+        )
+
+        XCTAssertEqual(
+            candidates,
+            [.specific("airpods"), .systemDefault, .specific("built-in"), .specific("usb")]
+        )
+    }
+
+    func testAudioInputRoutePlannerDropsStaleSelectionButKeepsSystemDefaultRefresh() {
+        let devices = [
+            AudioInputDevice(id: "built-in", name: "MacBook Pro Microphone"),
+            AudioInputDevice(id: "airpods", name: "Florian AirPods")
+        ]
+
+        let candidates = AudioInputRoutePlanner.orderedCandidates(
+            selectedUID: "missing-device",
+            systemDefaultUID: "airpods",
+            availableDevices: devices
+        )
+
+        XCTAssertEqual(
+            candidates,
+            [.systemDefault, .specific("airpods"), .specific("built-in")]
+        )
+    }
+
+    func testAudioInputRoutePlannerFallsBackAcrossRemainingDevices() {
+        let devices = [
+            AudioInputDevice(id: "airpods", name: "Florian AirPods"),
+            AudioInputDevice(id: "built-in", name: "MacBook Pro Microphone"),
+            AudioInputDevice(id: "usb", name: "USB Microphone")
+        ]
+
+        let candidates = AudioInputRoutePlanner.orderedCandidates(
+            selectedUID: nil,
+            systemDefaultUID: "airpods",
+            availableDevices: devices
+        )
+
+        XCTAssertEqual(
+            candidates,
+            [.systemDefault, .specific("airpods"), .specific("built-in"), .specific("usb")]
+        )
+    }
+
+    func testAsyncOperationEpochInvalidatesOlderTokens() {
+        var epoch = AsyncOperationEpoch()
+
+        let first = epoch.begin()
+        XCTAssertTrue(epoch.isCurrent(first))
+
+        let second = epoch.begin()
+        XCTAssertFalse(epoch.isCurrent(first))
+        XCTAssertTrue(epoch.isCurrent(second))
+
+        epoch.invalidate()
+        XCTAssertFalse(epoch.isCurrent(second))
+    }
     
     // MARK: - NativeASRService Tests
     

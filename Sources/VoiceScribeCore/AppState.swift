@@ -5,6 +5,23 @@ import os.log
 
 private let logger = Logger(subsystem: "com.voicescribe", category: "AppState")
 
+struct AsyncOperationEpoch {
+    private var value: UInt64 = 0
+
+    mutating func begin() -> UInt64 {
+        value &+= 1
+        return value
+    }
+
+    mutating func invalidate() {
+        value &+= 1
+    }
+
+    func isCurrent(_ token: UInt64) -> Bool {
+        token == value
+    }
+}
+
 @MainActor
 public class AppState: ObservableObject {
     public static let shared = AppState()
@@ -29,6 +46,10 @@ public class AppState: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var isInitializing = false
     private var stopRequestedWhileStarting = false
+    private var interactionEpoch = AsyncOperationEpoch()
+    private var recordingStartTask: Task<Void, Never>?
+    private var transcriptionTask: Task<Void, Never>?
+    private var statusResetTask: Task<Void, Never>?
     
     public init() {
         logger.info("🔧 AppState init")
@@ -107,6 +128,7 @@ public class AppState: ObservableObject {
 
     public func shutdown() {
         logger.info("🔧 shutdown() called")
+        invalidatePendingInteractionWork()
         if recorder.isRecording {
             _ = recorder.stopRecording()
         }
@@ -139,14 +161,25 @@ public class AppState: ObservableObject {
     private func startRecording() {
         logger.info("🎙️ startRecording() called")
         guard !isStartingRecording else { return }
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
+        statusResetTask?.cancel()
+        statusResetTask = nil
         isStartingRecording = true
         stopRequestedWhileStarting = false
-        
-        Task {
+        let epoch = interactionEpoch.begin()
+
+        let task = Task { [self] in
             defer { isStartingRecording = false }
             do {
                 logger.info("🎙️ Calling recorder.startRecording()...")
                 try await recorder.startRecording()
+                guard interactionEpoch.isCurrent(epoch) else {
+                    if recorder.isRecording {
+                        _ = recorder.stopRecording()
+                    }
+                    return
+                }
                 logger.info("🎙️ recorder.startRecording() succeeded!")
                 isRecording = true
                 status = "🎤 Recording..."
@@ -156,18 +189,32 @@ public class AppState: ObservableObject {
                     stopRequestedWhileStarting = false
                     stopRecordingAndTranscribe()
                 }
+                recordingStartTask = nil
             } catch {
+                guard interactionEpoch.isCurrent(epoch) else {
+                    recordingStartTask = nil
+                    return
+                }
                 logger.error("🎙️ recorder.startRecording() FAILED: \(error.localizedDescription)")
                 status = "Microphone Error"
                 errorMessage = error.localizedDescription
                 stopRequestedWhileStarting = false
+                recordingStartTask = nil
             }
         }
+        recordingStartTask = task
     }
     
     private func stopRecordingAndTranscribe() {
         logger.info("🎙️ stopRecordingAndTranscribe() called")
-        
+        let epoch = interactionEpoch.begin()
+        recordingStartTask?.cancel()
+        recordingStartTask = nil
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
+        statusResetTask?.cancel()
+        statusResetTask = nil
+
         let samples = recorder.stopRecording()
         isRecording = false
         status = "Processing..."
@@ -180,14 +227,19 @@ public class AppState: ObservableObject {
             status = "No audio"
             return
         }
-        
-        Task {
+
+        let sampleRate = recorder.outputSampleRate
+        let task = Task { [self] in
             logger.info("🎙️ Calling engine.transcribe()...")
             do {
                 let text = try await engine.transcribe(
                     samples: samples,
-                    sampleRate: recorder.outputSampleRate
+                    sampleRate: sampleRate
                 )
+                guard interactionEpoch.isCurrent(epoch) else {
+                    transcriptionTask = nil
+                    return
+                }
                 logger.info("🎙️ Transcription result: \(text.prefix(50))...")
                 transcript = text
                 errorMessage = nil
@@ -206,6 +258,10 @@ public class AppState: ObservableObject {
                     status = "No speech detected"
                 }
             } catch {
+                guard interactionEpoch.isCurrent(epoch) else {
+                    transcriptionTask = nil
+                    return
+                }
                 logger.error("Transcription error: \(error.localizedDescription)")
                 if case ASRError.emptyTranscription = error {
                     status = "No speech detected"
@@ -214,12 +270,11 @@ public class AppState: ObservableObject {
                 }
                 errorMessage = error.localizedDescription
             }
-            
-            try? await Task.sleep(for: .seconds(2))
-            if !isRecording {
-                status = isReady ? "Ready" : "Waiting..."
-            }
+
+            transcriptionTask = nil
+            scheduleStatusReset(for: epoch)
         }
+        transcriptionTask = task
     }
     
     public func clearTranscript() {
@@ -232,5 +287,30 @@ public class AppState: ObservableObject {
 
     public func setPreferredInputDevice(uid: String?) {
         recorder.setSelectedInputDevice(uid: uid)
+    }
+
+    private func scheduleStatusReset(for epoch: UInt64) {
+        statusResetTask?.cancel()
+        statusResetTask = Task { [self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard interactionEpoch.isCurrent(epoch) else {
+                statusResetTask = nil
+                return
+            }
+            if !isRecording {
+                status = isReady ? "Ready" : "Waiting..."
+            }
+            statusResetTask = nil
+        }
+    }
+
+    private func invalidatePendingInteractionWork() {
+        interactionEpoch.invalidate()
+        recordingStartTask?.cancel()
+        recordingStartTask = nil
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
+        statusResetTask?.cancel()
+        statusResetTask = nil
     }
 }
