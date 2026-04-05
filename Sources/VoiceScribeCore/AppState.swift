@@ -181,6 +181,7 @@ public class AppState: ObservableObject {
     private func startRecording() {
         logger.info("🎙️ startRecording() called")
         guard !isStartingRecording else { return }
+        engine.warmModelIfNeeded()
         transcriptionTask?.cancel()
         transcriptionTask = nil
         statusResetTask?.cancel()

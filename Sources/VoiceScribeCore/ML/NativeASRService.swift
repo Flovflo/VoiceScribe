@@ -76,6 +76,16 @@ public final class NativeASRService: ObservableObject {
         await engine.setPreferredLanguage(language)
     }
 
+    public func warmModelIfNeeded() {
+        Task {
+            do {
+                try await engine.loadModel()
+            } catch {
+                lastError = error.localizedDescription
+            }
+        }
+    }
+
     public func shutdown() {
         status = "Shutdown"
         isReady = false

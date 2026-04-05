@@ -67,6 +67,8 @@ public actor NativeASREngine {
     private var modelName: String
     private var preferredLanguage: String?
     private let useCPUDevice: Bool
+    private let cacheLimitBytes: Int
+    private let idleUnloadDelaySeconds: TimeInterval?
 
     private var model: Qwen3ASR?
     private var tokenizer: (any Tokenizer)?
@@ -75,6 +77,9 @@ public actor NativeASREngine {
     private var isLoading = false
     private var isReady = false
     private var isModelCached = false
+    private var loadTask: Task<Void, Error>?
+    private var idleUnloadTask: Task<Void, Never>?
+    private var idleUnloadGeneration: UInt64 = 0
 
     private let eventsStream: AsyncStream<Event>
     private let eventsContinuation: AsyncStream<Event>.Continuation
@@ -95,12 +100,15 @@ public actor NativeASREngine {
         self.featureExtractor = AudioFeatureExtractor(backend: featureBackend)
         let envDevice = ProcessInfo.processInfo.environment["VOICESCRIBE_MLX_DEVICE"]?.lowercased()
         self.useCPUDevice = (envDevice == "cpu")
+        self.cacheLimitBytes = ASRMemoryPolicy.cacheLimitBytes()
+        self.idleUnloadDelaySeconds = ASRMemoryPolicy.idleUnloadDelaySeconds()
 
         var continuation: AsyncStream<Event>.Continuation!
         self.eventsStream = AsyncStream { cont in
             continuation = cont
         }
         self.eventsContinuation = continuation
+        Memory.cacheLimit = self.cacheLimitBytes
     }
 
     // MARK: - Public API
@@ -123,12 +131,31 @@ public actor NativeASREngine {
     }
 
     public func loadModel() async throws {
+        if isReady, model != nil, tokenizer != nil {
+            scheduleIdleUnloadIfNeeded()
+            return
+        }
+        if let loadTask {
+            return try await loadTask.value
+        }
+
+        let task = Task { try await self.performLoadModel() }
+        loadTask = task
+        defer { loadTask = nil }
+        try await task.value
+    }
+
+    private func performLoadModel() async throws {
         guard Self.isAllowedModel(modelName) else {
             throw ASRError.unsupportedModel(modelName)
         }
-        guard !isLoading else { return }
+        cancelIdleUnload()
+        configureMemoryPolicy()
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            scheduleIdleUnloadIfNeeded()
+        }
 
         let repoId = modelName
         let hasLocalModelFiles = Self.hasCachedModelFiles(repoId)
@@ -277,6 +304,10 @@ public actor NativeASREngine {
                 try model.update(parameters: parameters, verify: .none)
                 MLX.eval(model.parameters())
             }
+            weights.removeAll(keepingCapacity: false)
+            sanitizedWeights.removeAll(keepingCapacity: false)
+            Memory.clearCache()
+            Self.logMemorySnapshot("after model load", cacheLimitBytes: cacheLimitBytes)
 
             if ProcessInfo.processInfo.environment["VOICESCRIBE_DEBUG_WEIGHTS"] == "1" {
                 let flatParams = model.parameters().flattened()
@@ -313,6 +344,9 @@ public actor NativeASREngine {
         } catch {
             Self.logger.error("Model load error: \(error.localizedDescription)")
             isReady = false
+            model = nil
+            tokenizer = nil
+            Memory.clearCache()
             emit(.ready(false))
             emit(.error(error.localizedDescription))
             emit(.status("Error: \(error.localizedDescription)"))
@@ -321,9 +355,10 @@ public actor NativeASREngine {
     }
 
     public func transcribe(samples: [Float], sampleRate: Int) async throws -> String {
-        guard isReady, let model, let tokenizer else {
-            throw ASRError.modelNotLoaded
-        }
+        cancelIdleUnload()
+        defer { finishInferenceMemoryCycle() }
+        try await ensureModelResident()
+        guard let model, let tokenizer else { throw ASRError.modelNotLoaded }
 
         emit(.status("Processing audio..."))
         let selectedLanguage = preferredLanguage
@@ -432,10 +467,15 @@ public actor NativeASREngine {
     }
 
     public func shutdown() {
+        cancelIdleUnload()
+        loadTask?.cancel()
+        loadTask = nil
         model = nil
         tokenizer = nil
         isReady = false
         isModelCached = false
+        Memory.clearCache()
+        Self.logMemorySnapshot("after shutdown", cacheLimitBytes: cacheLimitBytes)
         emit(.ready(false))
         emit(.cached(false))
         emit(.status("Shutdown"))
@@ -445,6 +485,60 @@ public actor NativeASREngine {
 
     private func emit(_ event: Event) {
         eventsContinuation.yield(event)
+    }
+
+    private func configureMemoryPolicy() {
+        Memory.cacheLimit = cacheLimitBytes
+    }
+
+    private func ensureModelResident() async throws {
+        if model != nil, tokenizer != nil, isReady {
+            return
+        }
+        try await loadModel()
+    }
+
+    private func finishInferenceMemoryCycle() {
+        Memory.clearCache()
+        Self.logMemorySnapshot("after transcription", cacheLimitBytes: cacheLimitBytes)
+        scheduleIdleUnloadIfNeeded()
+    }
+
+    private func scheduleIdleUnloadIfNeeded() {
+        idleUnloadTask?.cancel()
+        idleUnloadGeneration &+= 1
+        guard let idleUnloadDelaySeconds, idleUnloadDelaySeconds > 0 else {
+            idleUnloadTask = nil
+            return
+        }
+        let generation = idleUnloadGeneration
+        idleUnloadTask = Task {
+            do {
+                try await Task.sleep(for: .seconds(idleUnloadDelaySeconds))
+            } catch {
+                return
+            }
+            await unloadModelIfIdle(expectedGeneration: generation)
+        }
+    }
+
+    private func cancelIdleUnload() {
+        idleUnloadTask?.cancel()
+        idleUnloadTask = nil
+        idleUnloadGeneration &+= 1
+    }
+
+    private func unloadModelIfIdle(expectedGeneration: UInt64) async {
+        guard expectedGeneration == idleUnloadGeneration else { return }
+        guard model != nil || tokenizer != nil else {
+            idleUnloadTask = nil
+            return
+        }
+        model = nil
+        tokenizer = nil
+        Memory.clearCache()
+        Self.logMemorySnapshot("after idle unload", cacheLimitBytes: cacheLimitBytes)
+        idleUnloadTask = nil
     }
 
     static func languageAttemptOrder(preferredLanguage: String?) -> [String?] {
@@ -610,6 +704,22 @@ public actor NativeASREngine {
             return dict["content"] as? String
         }
         return nil
+    }
+
+    private static func logMemorySnapshot(_ label: String, cacheLimitBytes: Int) {
+        guard ProcessInfo.processInfo.environment["VOICESCRIBE_DEBUG_MEMORY"] == "1" else {
+            return
+        }
+        let snapshot = Memory.snapshot()
+        logger.info(
+            """
+            [Memory] \(label, privacy: .public) \
+            active=\(snapshot.activeMemory, privacy: .public) \
+            cache=\(snapshot.cacheMemory, privacy: .public) \
+            peak=\(snapshot.peakMemory, privacy: .public) \
+            cacheLimit=\(cacheLimitBytes, privacy: .public)
+            """
+        )
     }
 
     static func cleanTranscriptionForDisplay(_ rawText: String) -> String {
