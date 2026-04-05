@@ -293,17 +293,6 @@ struct VoiceScribeTemplateOnboarding: View {
     }
 
     private var bezelShape: AnyShape {
-        if #available(macOS 26.0, *) {
-            return .init(
-                ConcentricRectangle(
-                    topLeadingCorner: .concentric,
-                    topTrailingCorner: .concentric,
-                    bottomLeadingCorner: .fixed(0),
-                    bottomTrailingCorner: .fixed(0)
-                )
-            )
-        }
-
         return .init(
             UnevenRoundedRectangle(
                 topLeadingRadius: 38,
