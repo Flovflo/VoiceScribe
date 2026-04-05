@@ -108,7 +108,6 @@ public actor NativeASREngine {
             continuation = cont
         }
         self.eventsContinuation = continuation
-        Memory.cacheLimit = self.cacheLimitBytes
     }
 
     // MARK: - Public API
