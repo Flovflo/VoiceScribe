@@ -38,8 +38,8 @@ final class ASRMemoryPolicyTests: XCTestCase {
         XCTAssertEqual(bytes, 512 * 1_048_576)
     }
 
-    func testIdleUnloadDelayDefaultsToThreeMinutes() {
-        XCTAssertEqual(ASRMemoryPolicy.idleUnloadDelaySeconds(environment: [:]), 180)
+    func testIdleUnloadDelayDefaultsToDisabled() {
+        XCTAssertNil(ASRMemoryPolicy.idleUnloadDelaySeconds(environment: [:]))
     }
 
     func testIdleUnloadDelayCanBeDisabled() {
@@ -56,6 +56,14 @@ final class ASRMemoryPolicyTests: XCTestCase {
                 environment: ["VOICESCRIBE_IDLE_UNLOAD_SECONDS": "45"]
             ),
             45
+        )
+    }
+
+    func testInvalidIdleUnloadDelayFallsBackToDisabled() {
+        XCTAssertNil(
+            ASRMemoryPolicy.idleUnloadDelaySeconds(
+                environment: ["VOICESCRIBE_IDLE_UNLOAD_SECONDS": "oops"]
+            )
         )
     }
 }

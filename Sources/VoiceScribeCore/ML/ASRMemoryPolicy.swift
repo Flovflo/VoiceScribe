@@ -6,7 +6,6 @@ enum ASRMemoryPolicy {
     private static let defaultCacheFloorMB = 128
     private static let defaultCacheCeilingMB = 512
     private static let fallbackCacheLimitMB = 256
-    private static let defaultIdleUnloadSecondsValue: TimeInterval = 180
 
     static func cacheLimitBytes(
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -30,10 +29,10 @@ enum ASRMemoryPolicy {
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> TimeInterval? {
         guard let rawValue = environment["VOICESCRIBE_IDLE_UNLOAD_SECONDS"] else {
-            return defaultIdleUnloadSecondsValue
+            return nil
         }
         guard let seconds = Double(rawValue.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            return defaultIdleUnloadSecondsValue
+            return nil
         }
         guard seconds > 0 else {
             return nil

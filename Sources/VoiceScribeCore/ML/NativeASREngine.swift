@@ -499,7 +499,6 @@ public actor NativeASREngine {
     }
 
     private func finishInferenceMemoryCycle() {
-        Memory.clearCache()
         Self.logMemorySnapshot("after transcription", cacheLimitBytes: cacheLimitBytes)
         scheduleIdleUnloadIfNeeded()
     }
