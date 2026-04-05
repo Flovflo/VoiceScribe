@@ -11,6 +11,8 @@ facts
 *.xcodeproj
 xcuserdata/
 DerivedData/
+!VoiceScribe.xcodeproj/
+!VoiceScribe.xcodeproj/**
 
 # Swift Package Manager
 .swiftpm/

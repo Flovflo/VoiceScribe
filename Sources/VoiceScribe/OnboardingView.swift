@@ -37,7 +37,9 @@ struct OnboardingView: View {
             .init(
                 step: .welcome,
                 title: "Speak anywhere on your Mac",
-                subtitle: "VoiceScribe floats above your apps, listens in place,\nand pastes the transcript back for you.",
+                subtitle: AppDistribution.supportsAutomaticPaste
+                    ? "VoiceScribe floats above your apps, listens in place,\nand pastes the transcript back for you."
+                    : "VoiceScribe floats above your apps, listens in place,\nand copies the transcript to your clipboard.",
                 screenshotName: "SS2",
                 zoomScale: 1.18,
                 zoomAnchor: .init(x: 0.52, y: 0.38)

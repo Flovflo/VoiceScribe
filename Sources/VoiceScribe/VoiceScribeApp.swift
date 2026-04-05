@@ -253,6 +253,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Show HUD & Record", action: #selector(toggleAppAction(_:)), keyEquivalent: "r"))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettingsAction(_:)), keyEquivalent: ","))
+        menu.addItem(NSMenuItem(title: "Privacy Policy", action: #selector(openPrivacyPolicyAction(_:)), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Support", action: #selector(openSupportAction(_:)), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit VoiceScribe", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         
@@ -328,6 +330,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettingsAction(_ sender: Any?) {
         openSettings()
+    }
+
+    @objc private func openPrivacyPolicyAction(_ sender: Any?) {
+        NSWorkspace.shared.open(AppLinks.privacyPolicy)
+    }
+
+    @objc private func openSupportAction(_ sender: Any?) {
+        NSWorkspace.shared.open(AppLinks.support)
     }
 
     @MainActor

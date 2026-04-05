@@ -272,8 +272,9 @@ public class AppState: ObservableObject {
                     
                     status = "✅ Copied"
                     
-                    // Auto Paste
-                    InputInjector.pasteFromClipboard()
+                    if AppDistribution.supportsAutomaticPaste {
+                        InputInjector.pasteFromClipboard()
+                    }
                 } else {
                     status = "No speech detected"
                 }

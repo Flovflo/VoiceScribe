@@ -1,0 +1,85 @@
+name: VoiceScribe
+options:
+  minimumXcodeGenVersion: 2.44.1
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    MARKETING_VERSION: 1.4.2
+    CURRENT_PROJECT_VERSION: 1
+packages:
+  mlx-swift:
+    url: https://github.com/ml-explore/mlx-swift
+    branch: main
+  swift-transformers:
+    url: https://github.com/huggingface/swift-transformers
+    from: 1.1.6
+targets:
+  VoiceScribeCore:
+    type: framework
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Sources/VoiceScribeCore
+    dependencies:
+      - package: mlx-swift
+        product: MLX
+      - package: mlx-swift
+        product: MLXNN
+      - package: mlx-swift
+        product: MLXRandom
+      - package: swift-transformers
+        product: Hub
+      - package: swift-transformers
+        product: Tokenizers
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.voicescribe.core
+        PRODUCT_NAME: VoiceScribeCore
+        DEFINES_MODULE: YES
+        DEBUG_INFORMATION_FORMAT: dwarf
+        GENERATE_INFOPLIST_FILE: YES
+        SKIP_INSTALL: YES
+  VoiceScribeAppStore:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    info:
+      path: AppStore/VoiceScribeAppStore-Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.productivity
+        LSUIElement: true
+        NSMicrophoneUsageDescription: VoiceScribe needs microphone access to record audio that you explicitly dictate for on-device transcription.
+    entitlements:
+      path: AppStore/VoiceScribeAppStore.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.device.audio-input: true
+        com.apple.security.network.client: true
+    sources:
+      - path: Sources/VoiceScribe
+        excludes:
+          - Resources/.DS_Store
+      - path: AppStore/Resources
+        buildPhase: resources
+    dependencies:
+      - target: VoiceScribeCore
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.voicescribe.app
+        PRODUCT_NAME: VoiceScribe
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) VOICESCRIBE_APP_STORE
+        ENABLE_HARDENED_RUNTIME: YES
+schemes:
+  VoiceScribeAppStore:
+    build:
+      targets:
+        VoiceScribeAppStore: all
+    archive:
+      config: Release

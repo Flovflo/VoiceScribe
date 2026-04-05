@@ -45,6 +45,14 @@ struct SettingsView: View {
                 systemDefaultMicrophoneTag: systemDefaultMicrophoneTag
             )
 
+            if AppDistribution.isAppStoreBuild {
+                Section("Clipboard") {
+                    Text("This App Store build copies each transcript to the clipboard. Paste manually with Command-V in the destination app.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+
             Section("Engine Status") {
                 HStack {
                     Text("Status")

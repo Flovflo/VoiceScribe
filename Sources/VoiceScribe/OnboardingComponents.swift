@@ -374,7 +374,7 @@ private struct StepAccessoryView: View {
                 HStack(spacing: 10) {
                     KeyCap(text: "⌥")
                     KeyCap(text: "Space")
-                    Text("Open, dictate, paste back")
+                    Text(AppDistribution.supportsAutomaticPaste ? "Open, dictate, paste back" : "Open, dictate, copy back")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
@@ -452,7 +452,7 @@ private struct KeyCap: View {
 private enum VoiceScribeOnboardingAsset {
     static func image(named name: String) -> NSImage? {
         for fileExtension in ["png", "jpg", "jpeg"] {
-            if let url = Bundle.module.url(forResource: name, withExtension: fileExtension) {
+            if let url = VoiceScribeResourceBundle.current.url(forResource: name, withExtension: fileExtension) {
                 return NSImage(contentsOf: url)
             }
         }

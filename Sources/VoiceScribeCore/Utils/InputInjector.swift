@@ -1,12 +1,24 @@
 import Cocoa
-import CoreGraphics
 import os.log
+
+#if !VOICESCRIBE_APP_STORE
+import CoreGraphics
+#endif
 
 private let logger = Logger(subsystem: "com.voicescribe", category: "InputInjector")
 
 public class InputInjector {
+    public static var isAutomaticPasteSupported: Bool {
+        AppDistribution.supportsAutomaticPaste
+    }
     
     public static func pasteFromClipboard() {
+        guard isAutomaticPasteSupported else {
+            logger.info("Automatic paste is disabled for this distribution")
+            return
+        }
+
+        #if !VOICESCRIBE_APP_STORE
         logger.info("Simulating Cmd+V...")
         
         let source = CGEventSource(stateID: .hidSystemState)
@@ -33,5 +45,6 @@ public class InputInjector {
         cmdUp?.post(tap: loc)
         
         logger.info("Cmd+V posted")
+        #endif
     }
 }
