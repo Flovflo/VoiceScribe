@@ -25,6 +25,7 @@ struct OnboardingView: View {
     @ObservedObject private var appState = AppState.shared
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("selectedModel") private var selectedModel = ASRModelCatalog.defaultModelID
+    @AppStorage(ASRLanguageCatalog.defaultsKey) private var selectedLanguageID = ASRLanguageCatalog.defaultLanguageID
 
     let finishOnboarding: @MainActor () -> Void
 
@@ -44,7 +45,7 @@ struct OnboardingView: View {
             .init(
                 step: .model,
                 title: "Choose your local model",
-                subtitle: "Everything stays on-device. Pick the balance you want\nbetween memory footprint and transcription quality.",
+                subtitle: "Everything stays on-device. Pick your model and keep language on Auto,\nor force one when you want the best recognition accuracy.",
                 screenshotName: "template-scene-model",
                 zoomScale: 1.82,
                 zoomAnchor: .init(x: 1, y: 0.84)
@@ -69,6 +70,7 @@ struct OnboardingView: View {
             items: items,
             activeIndex: $activeIndex,
             selectedModel: $selectedModel,
+            selectedLanguageID: $selectedLanguageID,
             appState: appState,
             onExit: completeOnboarding,
             onSkip: completeOnboarding,
@@ -84,8 +86,14 @@ struct OnboardingView: View {
     }
 
     private func handleAppear() {
-        guard !ASRModelCatalog.isSupportedASRModel(selectedModel) else { return }
-        selectedModel = ASRModelCatalog.defaultModelID
+        if !ASRModelCatalog.isSupportedASRModel(selectedModel) {
+            selectedModel = ASRModelCatalog.defaultModelID
+        }
+
+        let normalizedLanguageID = ASRLanguageCatalog.normalizedLanguageID(selectedLanguageID)
+        if normalizedLanguageID != selectedLanguageID {
+            selectedLanguageID = normalizedLanguageID
+        }
     }
 
     private func startModelPreparation() {

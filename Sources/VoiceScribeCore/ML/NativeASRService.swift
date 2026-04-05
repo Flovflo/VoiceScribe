@@ -66,6 +66,16 @@ public final class NativeASRService: ObservableObject {
         }
     }
 
+    public func setPreferredLanguage(_ language: String?) {
+        Task {
+            await engine.setPreferredLanguage(language)
+        }
+    }
+
+    public func setPreferredLanguageAndWait(_ language: String?) async {
+        await engine.setPreferredLanguage(language)
+    }
+
     public func shutdown() {
         status = "Shutdown"
         isReady = false

@@ -5,6 +5,7 @@ struct VoiceScribeTemplateOnboarding: View {
     let items: [VoiceScribeOnboardingItem]
     @Binding var activeIndex: Int
     @Binding var selectedModel: String
+    @Binding var selectedLanguageID: String
     @ObservedObject var appState: AppState
     let onExit: () -> Void
     let onSkip: () -> Void
@@ -186,6 +187,7 @@ struct VoiceScribeTemplateOnboarding: View {
                     StepAccessoryView(
                         step: item.step,
                         selectedModel: $selectedModel,
+                        selectedLanguageID: $selectedLanguageID,
                         appState: appState
                     )
                     .padding(.top, 8)
@@ -329,6 +331,7 @@ struct VoiceScribeTemplateOnboarding: View {
 private struct StepAccessoryView: View {
     let step: OnboardingStep
     @Binding var selectedModel: String
+    @Binding var selectedLanguageID: String
     @ObservedObject var appState: AppState
 
     private let models = ASRModelCatalog.quickChoices
@@ -338,29 +341,33 @@ private struct StepAccessoryView: View {
         case .welcome:
             EmptyView()
         case .model:
-            HStack(spacing: 8) {
-                ForEach(models, id: \.id) { model in
-                    Button {
-                        selectedModel = model.id
-                    } label: {
-                        VStack(spacing: 2) {
-                            Text(model.title.replacingOccurrences(of: "Qwen3-ASR ", with: ""))
-                                .font(.system(size: 11, weight: .semibold))
-                            Text(model.quantization.uppercased())
-                                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                .foregroundStyle(.secondary)
+            VStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    ForEach(models, id: \.id) { model in
+                        Button {
+                            selectedModel = model.id
+                        } label: {
+                            VStack(spacing: 2) {
+                                Text(model.title.replacingOccurrences(of: "Qwen3-ASR ", with: ""))
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text(model.quantization.uppercased())
+                                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(
+                                selectedModel == model.id
+                                    ? Color.accentColor.opacity(0.18)
+                                    : Color.secondary.opacity(0.08),
+                                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            )
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(
-                            selectedModel == model.id
-                                ? Color.accentColor.opacity(0.18)
-                                : Color.secondary.opacity(0.08),
-                            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        )
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
+
+                OnboardingLanguageSelection(selectedLanguageID: $selectedLanguageID)
             }
         case .shortcut:
             if appState.isReady {
@@ -394,6 +401,39 @@ private struct StepAccessoryView: View {
             return errorMessage
         }
         return appState.status
+    }
+}
+
+private struct OnboardingLanguageSelection: View {
+    @Binding var selectedLanguageID: String
+
+    private var selectedLanguageTitle: String {
+        ASRLanguageCatalog.options
+            .first(where: { $0.id == ASRLanguageCatalog.normalizedLanguageID(selectedLanguageID) })?
+            .title ?? "Auto-detect (recommended)"
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Language")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                Picker("Language", selection: $selectedLanguageID) {
+                    ForEach(ASRLanguageCatalog.options) { option in
+                        Text(option.title).tag(option.id)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 220)
+            }
+
+            Text("Current: \(selectedLanguageTitle)")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
     }
 }
 

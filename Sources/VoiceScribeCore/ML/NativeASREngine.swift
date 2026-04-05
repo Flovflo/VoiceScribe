@@ -65,6 +65,7 @@ public actor NativeASREngine {
     private let featureExtractor: AudioFeatureExtractor
     private let config: Config
     private var modelName: String
+    private var preferredLanguage: String?
     private let useCPUDevice: Bool
 
     private var model: Qwen3ASR?
@@ -85,6 +86,7 @@ public actor NativeASREngine {
     public init(config: Config = .qwen3ASR_1_7B_8bit) {
         self.config = config
         self.modelName = config.modelName
+        self.preferredLanguage = Self.normalizePreferredLanguage(config.forcedLanguage)
         let featureBackend: AudioFeatureExtractor.Backend = {
             let value = ProcessInfo.processInfo.environment["VOICESCRIBE_FEATURE_BACKEND"]?.lowercased()
             if value == "cpu" { return .cpu }
@@ -114,6 +116,10 @@ public actor NativeASREngine {
         modelName = name
         shutdown()
         try await loadModel()
+    }
+
+    public func setPreferredLanguage(_ language: String?) {
+        preferredLanguage = Self.normalizePreferredLanguage(language)
     }
 
     public func loadModel() async throws {
@@ -320,7 +326,7 @@ public actor NativeASREngine {
         }
 
         emit(.status("Processing audio..."))
-        let preferredLanguage = config.forcedLanguage?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let selectedLanguage = preferredLanguage
         nonisolated(unsafe) let unsafeModel = model
         let unsafeTokenizer = tokenizer
         let debugASR = ProcessInfo.processInfo.environment["VOICESCRIBE_DEBUG_ASR"] == "1"
@@ -346,7 +352,7 @@ public actor NativeASREngine {
             guard inputBatch.dim(0) > 0 else { continue }
             processedChunks += 1
 
-            let statusLabel = (preferredLanguage?.isEmpty == false) ? preferredLanguage! : "auto"
+            let statusLabel = (selectedLanguage?.isEmpty == false) ? selectedLanguage! : "auto"
             if chunks.count > 1 {
                 emit(.status("Transcribing \(index + 1)/\(chunks.count) (\(statusLabel))..."))
             } else {
@@ -372,20 +378,15 @@ public actor NativeASREngine {
                 return (raw, cleaned)
             }
 
-            var triedLanguages = Set<String>()
-            var attempt = runOnce(language: preferredLanguage?.isEmpty == false ? preferredLanguage : nil)
-            if let preferredLanguage, !preferredLanguage.isEmpty {
-                triedLanguages.insert(preferredLanguage.lowercased())
-            } else {
-                triedLanguages.insert("auto")
-            }
+            let languageAttempts = Self.languageAttemptOrder(preferredLanguage: selectedLanguage)
+            var remainingAttempts = Set(languageAttempts.dropFirst().map(Self.languageAttemptKey(for:)))
+            var attempt = runOnce(language: languageAttempts[0])
             if attempt.cleaned.isEmpty && Self.shouldRetryLanguageFallbacks(raw: attempt.raw) {
-                for fallback in ["French", "English"] {
-                    let key = fallback.lowercased()
-                    if triedLanguages.contains(key) {
+                for fallback in languageAttempts.dropFirst() {
+                    let key = Self.languageAttemptKey(for: fallback)
+                    if remainingAttempts.remove(key) == nil {
                         continue
                     }
-                    triedLanguages.insert(key)
                     let retry = runOnce(language: fallback)
                     if !retry.cleaned.isEmpty {
                         attempt = retry
@@ -444,6 +445,26 @@ public actor NativeASREngine {
 
     private func emit(_ event: Event) {
         eventsContinuation.yield(event)
+    }
+
+    static func languageAttemptOrder(preferredLanguage: String?) -> [String?] {
+        if let preferredLanguage = normalizePreferredLanguage(preferredLanguage) {
+            return [preferredLanguage]
+        }
+        return [nil, "French", "English"]
+    }
+
+    private static func languageAttemptKey(for language: String?) -> String {
+        language?.lowercased() ?? "auto"
+    }
+
+    private static func normalizePreferredLanguage(_ language: String?) -> String? {
+        guard let trimmed = language?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty,
+              ASRLanguageCatalog.isSupportedModelLanguage(trimmed) else {
+            return nil
+        }
+        return trimmed
     }
 
     private static func cacheRoot() throws -> URL {

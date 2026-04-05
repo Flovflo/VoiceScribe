@@ -41,7 +41,7 @@ public class AppState: ObservableObject {
     
     // MARK: - Services
     public let recorder = AudioRecorder()
-    public let engine = NativeASRService()
+    public let engine: NativeASRService
     
     private var cancellables = Set<AnyCancellable>()
     private var isInitializing = false
@@ -52,6 +52,7 @@ public class AppState: ObservableObject {
     private var statusResetTask: Task<Void, Never>?
     
     public init() {
+        self.engine = Self.makeEngine()
         logger.info("🔧 AppState init")
         setupBindings()
         logger.info("🔧 AppState init complete")
@@ -115,6 +116,7 @@ public class AppState: ObservableObject {
             : "Preparing speech model download..."
         errorMessage = nil
         do {
+            await engine.setPreferredLanguageAndWait(Self.storedPreferredLanguage())
             if selectedModel == ASRModelCatalog.defaultModelID {
                 try await engine.loadModel()
             } else {
@@ -142,6 +144,23 @@ public class AppState: ObservableObject {
         errorMessage = nil
         status = "Shutdown"
         engine.shutdown()
+    }
+
+    private static func makeEngine() -> NativeASRService {
+        NativeASRService(
+            config: .init(
+                modelName: ASRModelCatalog.defaultModelID,
+                maxTokens: 256,
+                temperature: 0.0,
+                forcedLanguage: storedPreferredLanguage()
+            )
+        )
+    }
+
+    private static func storedPreferredLanguage() -> String? {
+        ASRLanguageCatalog.modelLanguage(
+            for: UserDefaults.standard.string(forKey: ASRLanguageCatalog.defaultsKey)
+        )
     }
     
     // MARK: - Recording
