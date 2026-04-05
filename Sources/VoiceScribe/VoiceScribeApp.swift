@@ -44,6 +44,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var isToggleInFlight = false
     private var lastToggleUptime: TimeInterval = -Double.greatestFiniteMagnitude
     private let toggleCooldown: TimeInterval = 0.35
+    private var didBecomeActiveObserver: NSObjectProtocol?
     
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     
@@ -72,16 +73,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             _ = self.attachMainWindowIfNeeded()
         }
 
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleAppDidBecomeActiveNotification(_:)),
-            name: NSApplication.didBecomeActiveNotification,
-            object: nil
-        )
-    }
-
-    @objc private func handleAppDidBecomeActiveNotification(_ notification: Notification) {
-        handleAppDidBecomeActive()
+        didBecomeActiveObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleAppDidBecomeActive()
+            }
+        }
     }
 
     @MainActor
@@ -170,7 +170,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        NotificationCenter.default.removeObserver(self)
+        if let didBecomeActiveObserver {
+            NotificationCenter.default.removeObserver(didBecomeActiveObserver)
+            self.didBecomeActiveObserver = nil
+        }
         AppState.shared.shutdown()
         ProcessInfo.processInfo.enableAutomaticTermination("VoiceScribe background service")
         ProcessInfo.processInfo.enableSuddenTermination()
