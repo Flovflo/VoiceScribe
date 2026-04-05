@@ -241,6 +241,13 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS/Resources"
 echo "📋 Copying Artifacts..."
 cp ".build/arm64-apple-macosx/release/$BINARY_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
+echo "📚 Copying SwiftPM resource bundles..."
+find ".build/arm64-apple-macosx/release" -maxdepth 1 -type d -name "*.bundle" -print0 | while IFS= read -r -d '' bundle_path; do
+    bundle_name=$(basename "$bundle_path")
+    cp -R "$bundle_path" "$APP_BUNDLE/Contents/Resources/$bundle_name"
+    echo "   Added: $bundle_name"
+done
+
 echo "🧠 Installing MLX Metallib..."
 if MLX_METALLIB_SOURCE=$(find_mlx_metallib_source); then
     # MLX runtime probes multiple locations relative to the executable:
@@ -317,6 +324,8 @@ cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
 EOF
 
 echo "✍️ Signing Bundle..."
+chmod -R u+w "$APP_BUNDLE"
+xattr -cr "$APP_BUNDLE"
 codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
 
 echo "✅ App Packaged: $APP_BUNDLE"
