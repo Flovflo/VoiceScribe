@@ -63,6 +63,12 @@ struct AudioInputRoutePlanner {
         availableDevices: [AudioInputDevice]
     ) -> [AudioInputRouteCandidate] {
         let availableUIDs = Set(availableDevices.map(\.id))
+        if let selectedUID,
+           !selectedUID.isEmpty,
+           (availableUIDs.contains(selectedUID) || selectedUID == systemDefaultUID) {
+            return [.specific(selectedUID)]
+        }
+
         var candidates: [AudioInputRouteCandidate] = []
         var seenSpecificUIDs = Set<String>()
         var includesSystemDefault = false
@@ -76,12 +82,6 @@ struct AudioInputRoutePlanner {
                 guard seenSpecificUIDs.insert(uid).inserted else { return }
             }
             candidates.append(candidate)
-        }
-
-        if let selectedUID,
-           !selectedUID.isEmpty,
-           (availableUIDs.contains(selectedUID) || selectedUID == systemDefaultUID) {
-            append(.specific(selectedUID))
         }
 
         append(.systemDefault)
@@ -121,6 +121,9 @@ final class AudioCaptureEngine: @unchecked Sendable {
             if currentDefault != preferredDeviceID {
                 guard Self.setDefaultInputDevice(preferredDeviceID) else {
                     throw AudioRecorderError.engineSetupFailed("Failed to switch to selected microphone")
+                }
+                guard Self.waitForDefaultInputDevice(preferredDeviceID, timeout: 1.0) else {
+                    throw AudioRecorderError.engineSetupFailed("Selected microphone did not become active")
                 }
                 previousDefaultInputDeviceID = currentDefault
             }
@@ -260,6 +263,20 @@ final class AudioCaptureEngine: @unchecked Sendable {
         )
         return status == noErr
     }
+
+    private static func waitForDefaultInputDevice(
+        _ expectedDeviceID: AudioDeviceID,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if defaultInputDeviceID() == expectedDeviceID {
+                return true
+            }
+            usleep(50_000)
+        }
+        return defaultInputDeviceID() == expectedDeviceID
+    }
 }
 
 @MainActor
@@ -334,10 +351,13 @@ public class AudioRecorder: ObservableObject {
         for candidate in candidates {
             do {
                 try await attemptCaptureStart(using: candidate)
+                logger.info("Microphone candidate \(self.logDescription(for: candidate), privacy: .public) selected")
                 return
             } catch {
                 lastError = error
-                logger.warning("Microphone candidate \(self.logDescription(for: candidate)) failed: \(error.localizedDescription)")
+                logger.warning(
+                    "Microphone candidate \(self.logDescription(for: candidate), privacy: .public) failed: \(error.localizedDescription, privacy: .public)"
+                )
             }
         }
 

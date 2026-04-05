@@ -50,7 +50,7 @@ final class VoiceScribeTests: XCTestCase {
         XCTAssertFalse(recorder.isRecording)
     }
 
-    func testAudioInputRoutePlannerPrefersSelectedThenSystemDefaultThenFallbacks() {
+    func testAudioInputRoutePlannerPinsExplicitSelection() {
         let devices = [
             AudioInputDevice(id: "built-in", name: "MacBook Pro Microphone"),
             AudioInputDevice(id: "airpods", name: "Florian AirPods"),
@@ -65,7 +65,7 @@ final class VoiceScribeTests: XCTestCase {
 
         XCTAssertEqual(
             candidates,
-            [.specific("airpods"), .systemDefault, .specific("built-in"), .specific("usb")]
+            [.specific("airpods")]
         )
     }
 
