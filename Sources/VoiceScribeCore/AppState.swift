@@ -61,28 +61,26 @@ public class AppState: ObservableObject {
     private func setupBindings() {
         recorder.$audioLevel
             .receive(on: DispatchQueue.main)
-            .assign(to: \.audioLevel, on: self)
-            .store(in: &cancellables)
+            .removeDuplicates()
+            .assign(to: &$audioLevel)
 
         recorder.$availableInputDevices
             .receive(on: DispatchQueue.main)
-            .assign(to: \.availableInputDevices, on: self)
-            .store(in: &cancellables)
+            .assign(to: &$availableInputDevices)
 
         recorder.$selectedInputDeviceUID
             .receive(on: DispatchQueue.main)
-            .assign(to: \.selectedInputDeviceUID, on: self)
-            .store(in: &cancellables)
+            .assign(to: &$selectedInputDeviceUID)
         
         engine.$status
             .receive(on: DispatchQueue.main)
-            .assign(to: \.status, on: self)
-            .store(in: &cancellables)
+            .removeDuplicates()
+            .assign(to: &$status)
         
         engine.$isReady
             .receive(on: DispatchQueue.main)
-            .assign(to: \.isReady, on: self)
-            .store(in: &cancellables)
+            .removeDuplicates()
+            .assign(to: &$isReady)
         
         // NativeEngine provides Double progress 0.0-1.0
         engine.$loadProgress
@@ -95,8 +93,7 @@ public class AppState: ObservableObject {
         
         engine.$lastError
             .receive(on: DispatchQueue.main)
-            .assign(to: \.errorMessage, on: self)
-            .store(in: &cancellables)
+            .assign(to: &$errorMessage)
     }
     
     // MARK: - Lifecycle
