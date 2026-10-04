@@ -360,6 +360,7 @@ public actor NativeASREngine {
     }
 
     public func transcribe(samples: [Float], sampleRate: Int) async throws -> String {
+        try Task.checkCancellation()
         cancelIdleUnload()
         defer { finishInferenceMemoryCycle() }
         try await ensureModelResident()
@@ -383,6 +384,7 @@ public actor NativeASREngine {
         var processedChunks = 0
 
         for (index, chunk) in chunks.enumerated() {
+            try Task.checkCancellation()
             var inputBatch = featureExtractor.extractFeaturesMLX(samples: chunk.samples, sampleRate: sampleRate)
             if ProcessInfo.processInfo.environment["VOICESCRIBE_MATERIALIZE_FEATURES"] == "1" {
                 MLX.eval(inputBatch)
@@ -399,8 +401,8 @@ public actor NativeASREngine {
                 emit(.status("Transcribing (\(statusLabel))..."))
             }
 
-            func runOnce(language: String?) -> (raw: String, cleaned: String) {
-                let raw = unsafeModel.generate(
+            func runOnce(language: String?) throws -> (raw: String, cleaned: String) {
+                let raw = try unsafeModel.generate(
                     audioFeatures: inputBatch,
                     tokenizer: unsafeTokenizer,
                     audioTokenID: audioTokenID,
@@ -420,14 +422,14 @@ public actor NativeASREngine {
 
             let languageAttempts = Self.languageAttemptOrder(preferredLanguage: selectedLanguage)
             var remainingAttempts = Set(languageAttempts.dropFirst().map(Self.languageAttemptKey(for:)))
-            var attempt = runOnce(language: languageAttempts[0])
+            var attempt = try runOnce(language: languageAttempts[0])
             if attempt.cleaned.isEmpty && Self.shouldRetryLanguageFallbacks(raw: attempt.raw) {
                 for fallback in languageAttempts.dropFirst() {
                     let key = Self.languageAttemptKey(for: fallback)
                     if remainingAttempts.remove(key) == nil {
                         continue
                     }
-                    let retry = runOnce(language: fallback)
+                    let retry = try runOnce(language: fallback)
                     if !retry.cleaned.isEmpty {
                         attempt = retry
                         break
