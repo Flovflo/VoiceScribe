@@ -1,6 +1,7 @@
 import Foundation
 @preconcurrency import AVFoundation
 import CoreAudio
+import Accelerate
 import os.log
 
 private let logger = Logger(subsystem: "com.voicescribe", category: "AudioRecorder")
@@ -105,7 +106,10 @@ final class AudioCaptureEngine: @unchecked Sendable {
     private var samples: [Float] = []
     private let lock = NSLock()
     private(set) var sampleRate: Double = 48000
-    private(set) var lastRMS: Float = 0
+    private var rms: Float = 0
+    var lastRMS: Float {
+        lock.withLock { rms }
+    }
     private(set) var isCapturing = false
     private var previousDefaultInputDeviceID: AudioDeviceID?
     private var hasReceivedBuffer = false
@@ -114,6 +118,7 @@ final class AudioCaptureEngine: @unchecked Sendable {
         lock.lock()
         samples.removeAll()
         hasReceivedBuffer = false
+        rms = 0
         lock.unlock()
 
         if let preferredDeviceID {
@@ -166,22 +171,44 @@ final class AudioCaptureEngine: @unchecked Sendable {
 
     }
     
-    private func handleBuffer(_ buffer: AVAudioPCMBuffer) {
+    func handleBuffer(_ buffer: AVAudioPCMBuffer) {
         guard let channelData = buffer.floatChannelData else { return }
         let count = Int(buffer.frameLength)
-        guard count > 0 else { return }
-        
-        let newSamples = Array(UnsafeBufferPointer(start: channelData[0], count: count))
-        
-        // Calculate RMS
-        var sum: Float = 0
-        for s in newSamples { sum += s * s }
-        lastRMS = sqrt(sum / Float(count))
-        
-        lock.lock()
-        hasReceivedBuffer = true
-        samples.append(contentsOf: newSamples)
-        lock.unlock()
+        let channels = Int(buffer.format.channelCount)
+        guard count > 0, channels > 0 else { return }
+
+        // Read the callback's borrowed storage directly for mono; only multichannel
+        // input needs a temporary buffer. vDSP also handles interleaved strides.
+        let stride = vDSP_Stride(buffer.stride)
+        func append(_ pointer: UnsafePointer<Float>, stride: vDSP_Stride) {
+            var level: Float = 0
+            vDSP_rmsqv(pointer, stride, &level, vDSP_Length(count))
+            lock.withLock {
+                hasReceivedBuffer = true
+                rms = level
+                if stride == 1 {
+                    samples.append(contentsOf: UnsafeBufferPointer(start: pointer, count: count))
+                } else {
+                    for frame in 0..<count { samples.append(pointer[frame * Int(stride)]) }
+                }
+            }
+        }
+
+        if channels == 1 {
+            append(UnsafePointer(channelData[0]), stride: stride)
+        } else {
+            var mono = [Float](repeating: 0, count: count)
+            mono.withUnsafeMutableBufferPointer { output in
+                guard let destination = output.baseAddress else { return }
+                for channel in 0..<channels {
+                    vDSP_vadd(destination, 1, channelData[channel], stride,
+                              destination, 1, vDSP_Length(count))
+                }
+                var gain = 1 / Float(channels)
+                vDSP_vsmul(destination, 1, &gain, destination, 1, vDSP_Length(count))
+                append(UnsafePointer(destination), stride: 1)
+            }
+        }
     }
     
     func stop() -> [Float] {
@@ -201,6 +228,8 @@ final class AudioCaptureEngine: @unchecked Sendable {
         lock.lock()
         let result = samples
         samples.removeAll()
+        hasReceivedBuffer = false
+        rms = 0
         lock.unlock()
         
         return result
@@ -209,12 +238,17 @@ final class AudioCaptureEngine: @unchecked Sendable {
     func waitForFirstBuffer(timeout: Duration) async -> Bool {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
+            guard !Task.isCancelled else { return false }
             if didReceiveBuffer() {
                 return true
             }
-            try? await Task.sleep(for: .milliseconds(25))
+            do {
+                try await Task.sleep(for: .milliseconds(25))
+            } catch {
+                return false
+            }
         }
-        return didReceiveBuffer()
+        return !Task.isCancelled && didReceiveBuffer()
     }
 
     private func didReceiveBuffer() -> Bool {
