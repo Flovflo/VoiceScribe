@@ -37,6 +37,10 @@ let package = Package(
         .testTarget(
             name: "VoiceScribeTests",
             dependencies: ["VoiceScribeCore"]
+        ),
+        .testTarget(
+            name: "VoiceScribeUITests",
+            dependencies: ["VoiceScribe"]
         )
     ]
 )

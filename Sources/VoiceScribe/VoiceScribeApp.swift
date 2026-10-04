@@ -7,28 +7,16 @@ struct VoiceScribeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
-        Window("VoiceScribe HUD", id: "hud-window") {
-            GlassView()
-                .frame(width: GlassView.hudWidth, height: GlassView.hudHeight)
-                .background(Color.clear)
-        }
-        .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
-        .commands {
-            // Disable default commands to avoid "New Window" options being easily accessible if not desired
-            CommandGroup(replacing: .newItem) { }
+        Settings {
+            SettingsView()
         }
     }
 }
 
-// Custom window that accepts clicks even when borderless
-class ClickableWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
-    
-    func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        return true
-    }
+// A dictation overlay must leave the keyboard focus in the destination app.
+class ClickableWindow: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
 }
 
 
@@ -67,7 +55,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Wait for SwiftUI WindowGroup window, then attach HUD behavior to it.
+        // Own one nonactivating HUD panel, independent of SwiftUI settings windows.
         Task { @MainActor [weak self] in
             guard let self else { return }
             _ = self.attachMainWindowIfNeeded()
@@ -95,12 +83,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @discardableResult
     private func attachMainWindowIfNeeded() -> NSWindow? {
         if let existing = floatWindow {
-            configureWindow(existing)
             return existing
         }
 
-        let hudWindows = findHUDWindows()
-        guard let window = hudWindows.first else { return nil }
+        let window = ClickableWindow(
+            contentRect: NSRect(x: 0, y: 0, width: GlassView.hudWidth, height: GlassView.hudHeight),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.hidesOnDeactivate = false
+        window.isFloatingPanel = true
+        window.contentView = NSHostingView(rootView: GlassView())
 
         floatWindow = window
         configureWindow(window)
@@ -110,7 +105,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             window.orderOut(nil)
             showOnboarding()
         } else {
-            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
         }
         return window
     }
@@ -123,38 +118,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 .map(ObjectIdentifier.init)
         )
 
-        var candidates: [NSWindow] = []
-        candidates.reserveCapacity(NSApplication.shared.windows.count)
-        for window in NSApplication.shared.windows {
-            if excludedWindowIDs.contains(ObjectIdentifier(window)) {
-                continue
-            }
-            if window.identifier == Self.onboardingWindowIdentifier {
-                continue
-            }
-            candidates.append(window)
+        return NSApplication.shared.windows.filter {
+            !excludedWindowIDs.contains(ObjectIdentifier($0))
+                && $0.identifier == Self.hudWindowIdentifier
         }
-
-        var identified: [NSWindow] = []
-        for window in candidates where window.identifier == Self.hudWindowIdentifier {
-            identified.append(window)
-        }
-        if !identified.isEmpty {
-            return identified
-        }
-
-        var sized: [NSWindow] = []
-        for window in candidates {
-            if abs(window.frame.width - GlassView.hudWidth) < 2
-                && abs(window.frame.height - GlassView.hudHeight) < 2 {
-                sized.append(window)
-            }
-        }
-        if !sized.isEmpty {
-            return sized
-        }
-
-        return candidates
     }
 
     @MainActor
@@ -220,7 +187,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Task { await AppState.shared.initialize() }
 
         if let window = attachMainWindowIfNeeded() {
-            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
         } else {
             floatWindow?.makeKeyAndOrderFront(nil)
         }
@@ -266,12 +233,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     @MainActor
     func configureWindow(_ window: NSWindow) {
+        let isNewHUD = window.identifier != Self.hudWindowIdentifier
         window.identifier = Self.hudWindowIdentifier
         window.isOpaque = false
         window.backgroundColor = .clear
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        window.styleMask = [.borderless]
+        window.styleMask = [.borderless, .nonactivatingPanel]
         window.level = .floating 
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isMovableByWindowBackground = true
@@ -285,15 +253,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
 
-        if let screen = NSScreen.main {
+        if isNewHUD, let screen = NSScreen.main {
             let screenRect = screen.visibleFrame
-            let x = (screenRect.width - GlassView.hudWidth) / 2
-            let y = screenRect.height * 0.85
+            let origin = Self.hudOrigin(in: screenRect)
             window.setFrame(
-                NSRect(x: x, y: y, width: GlassView.hudWidth, height: GlassView.hudHeight),
+                NSRect(origin: origin, size: NSSize(width: GlassView.hudWidth, height: GlassView.hudHeight)),
                 display: true
             )
         }
+    }
+
+    static func hudOrigin(in screenRect: NSRect) -> NSPoint {
+        NSPoint(
+            x: screenRect.midX - GlassView.hudWidth / 2,
+            y: screenRect.minY + max(0, screenRect.height - GlassView.hudHeight) * 0.85
+        )
     }
 
     @objc private func toggleAppAction(_ sender: Any?) {
@@ -312,18 +286,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         guard let window = attachMainWindowIfNeeded() else { return }
+        guard hasCompletedOnboarding else {
+            showOnboarding()
+            return
+        }
         collapseDuplicateHUDWindows(keeping: window)
         let appState = AppState.shared
         let action = HotKeyTogglePolicy().action(windowVisible: window.isVisible)
         if action == .showHUDThenToggleRecording {
             if let screen = NSScreen.main {
                 let screenRect = screen.visibleFrame
-                let x = (screenRect.width - GlassView.hudWidth) / 2
-                let y = screenRect.height * 0.85
-                window.setFrameOrigin(NSPoint(x: x, y: y))
+                window.setFrameOrigin(Self.hudOrigin(in: screenRect))
             }
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            window.orderFrontRegardless()
         }
 
         // Hotkey semantic: always toggle recording state (start/stop),
@@ -348,7 +323,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if settingsWindow == nil {
             let contentView = NSHostingView(rootView: SettingsView())
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 520, height: 480),
+                contentRect: NSRect(x: 0, y: 0, width: 520, height: 600),
                 styleMask: [.titled, .closable, .fullSizeContentView],
                 backing: .buffered, defer: false)
             window.center()
