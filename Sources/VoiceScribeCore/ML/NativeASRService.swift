@@ -99,10 +99,11 @@ public final class NativeASRService: ObservableObject {
     // MARK: - Private Helpers
 
     private func startListening() {
+        let events = engine.events
         eventsTask = Task { [weak self] in
-            guard let self else { return }
-            for await event in self.engine.events {
-                self.handle(event)
+            for await event in events {
+                guard !Task.isCancelled else { break }
+                self?.handle(event)
             }
         }
     }
