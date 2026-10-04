@@ -80,3 +80,18 @@ extension ASRLifecycleTests {
         XCTAssertNil(NativeASREngine.cachedModelDirectory("test/model", root: root), "Empty interrupted weight download must not be treated as cached")
     }
 }
+
+extension ASRLifecycleTests {
+    func testIncompleteWeightShardSetIsNotCached() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = root.appendingPathComponent("models/test/model")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for file in ["config.json", "tokenizer.json", "tokenizer_config.json", "model-00001-of-00002.safetensors"] {
+            try Data([1]).write(to: directory.appendingPathComponent(file))
+        }
+        XCTAssertNil(NativeASREngine.cachedModelDirectory("test/model", root: root))
+        try Data([1]).write(to: directory.appendingPathComponent("model-00002-of-00002.safetensors"))
+        XCTAssertEqual(NativeASREngine.cachedModelDirectory("test/model", root: root)?.path, directory.path)
+    }
+}

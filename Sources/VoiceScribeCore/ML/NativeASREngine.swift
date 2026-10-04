@@ -597,7 +597,7 @@ public actor NativeASREngine {
         return try await hub.snapshot(
             from: repoID,
             matching: ["config.json", "generation_config.json", "preprocessor_config.json",
-                       "chat_template.json", "*.safetensors", "tokenizer.json", "tokenizer_config.json",
+                       "chat_template.json", "*.safetensors", "*.safetensors.index.json", "tokenizer.json", "tokenizer_config.json",
                        "vocab.json", "merges.txt"],
             progressHandler: { value, _ in progress(value.fractionCompleted) }
         )
@@ -631,7 +631,26 @@ public actor NativeASREngine {
         }
 
         let weightFiles = (try? fileManager.contentsOfDirectory(at: modelDir, includingPropertiesForKeys: nil)) ?? []
-        return weightFiles.contains(where: { $0.pathExtension == "safetensors" && hasContent($0.lastPathComponent) }) ? modelDir : nil
+        let weights = weightFiles.filter { $0.pathExtension == "safetensors" }
+        guard !weights.isEmpty, weights.allSatisfy({ hasContent($0.lastPathComponent) }) else { return nil }
+        // A cancelled Hub snapshot can leave only the first shard. Do not bypass
+        // the downloader until every numbered shard has arrived.
+        let shardPattern = #"^(.*)-[0-9]{5}-of-([0-9]{5})\.safetensors$"#
+        guard let regex = try? NSRegularExpression(pattern: shardPattern) else { return nil }
+        for weight in weights {
+            let name = weight.lastPathComponent
+            guard let match = regex.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)),
+                  let prefixRange = Range(match.range(at: 1), in: name),
+                  let countRange = Range(match.range(at: 2), in: name),
+                  let count = Int(name[countRange]) else { continue }
+            guard count > 0 else { return nil }
+            let prefix = String(name[prefixRange])
+            for index in 1...count {
+                let shard = String(format: "%@-%05d-of-%05d.safetensors", prefix, index, count)
+                guard hasContent(shard) else { return nil }
+            }
+        }
+        return modelDir
     }
 
     private static func isAllowedModel(_ name: String) -> Bool {
