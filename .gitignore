@@ -16,19 +16,10 @@ DerivedData/
 
 # Swift Package Manager
 .swiftpm/
-Package.resolved
 
 # macOS
 .DS_Store
 *.app
-
-# Python
-venv/
-__pycache__/
-*.pyc
-*.pyo
-.Python
-*.egg-info/
 
 # IDE
 .vscode/
