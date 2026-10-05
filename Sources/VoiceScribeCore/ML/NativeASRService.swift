@@ -19,7 +19,7 @@ public final class NativeASRService: ObservableObject {
 
     // MARK: - Initialization
 
-    public convenience init(config: NativeASREngine.Config = .qwen3ASR_1_7B_8bit) {
+    public convenience init(config: NativeASREngine.Config = .qwen3ASR_1_7B_4bit) {
         self.init(engine: NativeASREngine(config: config))
     }
 

@@ -29,12 +29,19 @@ public actor NativeASREngine {
         public let chunkDurationSeconds: Float
         public let minChunkDurationSeconds: Float
 
-        public static let qwen3ASR_1_7B_8bit = Config(
+        public static let qwen3ASR_1_7B_4bit = Config(
             modelName: requiredModelID,
             maxTokens: 256,
             temperature: 0.0,
             forcedLanguage: nil,
             context: "",
+            chunkDurationSeconds: 30,
+            minChunkDurationSeconds: 1
+        )
+
+        public static let qwen3ASR_1_7B_8bit = Config(
+            modelName: "mlx-community/Qwen3-ASR-1.7B-8bit",
+            maxTokens: 256,
             chunkDurationSeconds: 30,
             minChunkDurationSeconds: 1
         )
@@ -90,7 +97,7 @@ public actor NativeASREngine {
 
     // MARK: - Initialization
 
-    public init(config: Config = .qwen3ASR_1_7B_8bit) {
+    public init(config: Config = .qwen3ASR_1_7B_4bit) {
         self.init(config: config, modelDirectoryLoader: Self.downloadModelDirectory)
     }
 
