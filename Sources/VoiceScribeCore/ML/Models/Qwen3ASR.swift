@@ -214,8 +214,21 @@ public class Qwen3ASR: Module {
         }
 
         let replacements = min(audioTokenPositions.count, audioEmbeddings.dim(1))
+        guard replacements > 0 else { return baseEmbeddings }
         let seqLen = baseEmbeddings.dim(1)
         let hiddenSize = baseEmbeddings.dim(2)
+        let start = audioTokenPositions[0]
+        if audioTokenPositions.prefix(replacements).enumerated().allSatisfy({ $0.element == start + $0.offset }) {
+            // Normal prompts contain one contiguous audio-pad span. Build three slices
+            // instead of allocating a scatter-update graph for every audio token.
+            var segments = [MLXArray]()
+            if start > 0 { segments.append(baseEmbeddings[0..., ..<start, 0...]) }
+            segments.append(audioEmbeddings[0..., ..<replacements, 0...])
+            if start + replacements < seqLen {
+                segments.append(baseEmbeddings[0..., (start + replacements)..., 0...])
+            }
+            return concatenated(segments, axis: 1)
+        }
         let mergedFlat = baseEmbeddings.reshaped(seqLen, hiddenSize)
         for i in 0..<replacements {
             let tokenIndex = audioTokenPositions[i]
