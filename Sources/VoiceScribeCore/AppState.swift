@@ -45,14 +45,19 @@ public class AppState: ObservableObject {
     
     private var cancellables = Set<AnyCancellable>()
     private var isInitializing = false
+    private var initializationGeneration: UInt64 = 0
     private var stopRequestedWhileStarting = false
     private var interactionEpoch = AsyncOperationEpoch()
     private var recordingStartTask: Task<Void, Never>?
     private var transcriptionTask: Task<Void, Never>?
     private var statusResetTask: Task<Void, Never>?
     
-    public init() {
-        self.engine = Self.makeEngine()
+    public convenience init() {
+        self.init(engine: Self.makeEngine())
+    }
+
+    init(engine: NativeASRService) {
+        self.engine = engine
         logger.info("🔧 AppState init")
         setupBindings()
         logger.info("🔧 AppState init complete")
@@ -102,7 +107,11 @@ public class AppState: ObservableObject {
         guard !isInitializing else { return }
         guard !isReady else { return }
         isInitializing = true
-        defer { isInitializing = false }
+        initializationGeneration &+= 1
+        let generation = initializationGeneration
+        defer {
+            if generation == initializationGeneration { isInitializing = false }
+        }
 
         logger.info("🔧 initialize() called")
         let selectedModel = modelID
@@ -114,12 +123,14 @@ public class AppState: ObservableObject {
         errorMessage = nil
         do {
             await engine.setPreferredLanguageAndWait(Self.storedPreferredLanguage())
+            guard generation == initializationGeneration, !Task.isCancelled else { return }
             if selectedModel == ASRModelCatalog.defaultModelID {
                 try await engine.loadModel()
             } else {
                 try await engine.setModelAndWait(selectedModel)
             }
         } catch {
+            guard generation == initializationGeneration, !(error is CancellationError) else { return }
             status = "Model Error"
             errorMessage = error.localizedDescription
         }
@@ -128,6 +139,8 @@ public class AppState: ObservableObject {
 
     public func shutdown() {
         logger.info("🔧 shutdown() called")
+        initializationGeneration &+= 1
+        isInitializing = false
         invalidatePendingInteractionWork()
         if recorder.isRecording {
             _ = recorder.stopRecording()
