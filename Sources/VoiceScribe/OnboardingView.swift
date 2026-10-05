@@ -78,7 +78,6 @@ struct OnboardingView: View {
             onSkip: completeOnboarding,
             onComplete: completeOnboarding
         )
-        .preferredColorScheme(.dark)
         .onAppear(perform: handleAppear)
         .onChange(of: activeIndex) { _, newValue in
             guard items[newValue].step == .shortcut else { return }

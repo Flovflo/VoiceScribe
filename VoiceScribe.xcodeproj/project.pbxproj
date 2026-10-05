@@ -22,12 +22,14 @@
 		36F4583751622E14FB29ED5C /* NativeASRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E765808965BEA8785CD4349 /* NativeASRService.swift */; };
 		46D273F2D330E3712DBDFB36 /* NativeASREngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = C66534BB4ABAC51C70B79884 /* NativeASREngine.swift */; };
 		50BCB7AEF0097800CBCE9C6C /* MLXRandom in Frameworks */ = {isa = PBXBuildFile; productRef = D26235E4E1AD70DFFAAB4D20 /* MLXRandom */; };
+		529856007712FC4DAA637C64 /* ASRMemoryPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE7B49DC09B09053B3F56299 /* ASRMemoryPolicy.swift */; };
 		55A42EAB9109D429A19D2913 /* VoiceScribeCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0BC559FA9B90E522F2DB31CE /* VoiceScribeCore.framework */; };
 		56F56FE8B3CD85BCFA77D585 /* SS1.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 192FCFF9D1B8971E3DF4AED8 /* SS1.jpg */; };
 		57969A0B5E95F597BCE71CAF /* InputInjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4905D33DA0351EA133D7C55A /* InputInjector.swift */; };
 		59CCEEA574B14A92C572A53B /* onboarding-app-icon.png in Resources */ = {isa = PBXBuildFile; fileRef = 4753FBBCDD004B579C963953 /* onboarding-app-icon.png */; };
 		61F41B94229FC15F9F59DA57 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = F0ABEA31C3C67DD15CE0B212 /* MLX */; };
 		64DCADC596172FD920A52D74 /* template-scene-welcome.png in Resources */ = {isa = PBXBuildFile; fileRef = BDDED0E970AD9D8668DAC52E /* template-scene-welcome.png */; };
+		6504E0C378E7F65B2D7E9F31 /* GlassStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 783D7257FBE25B19EE75D0D5 /* GlassStyle.swift */; };
 		6CFB4BD4AEAE6222DD287013 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 4A66E8F5FC33A4199116C55A /* PrivacyInfo.xcprivacy */; };
 		718BD829DAAC890E31F68190 /* ASRModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4422223B1446F6D41C1C02D /* ASRModelCatalog.swift */; };
 		7CF702BBC780A54874387CB7 /* template-scene-shortcut.png in Resources */ = {isa = PBXBuildFile; fileRef = C264CE6001994C2B250E5A2E /* template-scene-shortcut.png */; };
@@ -93,6 +95,7 @@
 		668215A1A58DD6D02F9A671B /* HotKeyTogglePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKeyTogglePolicy.swift; sourceTree = "<group>"; };
 		67DFD75FE3F04F7A3A3F7EB7 /* MelSpectrogram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MelSpectrogram.swift; sourceTree = "<group>"; };
 		7117A33E86F37865F87F3513 /* template-scene-model.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "template-scene-model.png"; sourceTree = "<group>"; };
+		783D7257FBE25B19EE75D0D5 /* GlassStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassStyle.swift; sourceTree = "<group>"; };
 		838DDAEE0D078B1467FE22C6 /* OnboardingComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingComponents.swift; sourceTree = "<group>"; };
 		939638E9F1C6767D2DD27827 /* Qwen2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Qwen2.swift; sourceTree = "<group>"; };
 		95ABEE14CDE3413F9679F6F9 /* template-scene-prepare.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "template-scene-prepare.png"; sourceTree = "<group>"; };
@@ -111,6 +114,7 @@
 		D71DFEE136E6B21006228AD4 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		F0FF7E8B72D43292F4C97CC3 /* SS3.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = SS3.jpg; sourceTree = "<group>"; };
 		FA5DA53B3150101053ECBCF3 /* VoiceScribeResourceBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceScribeResourceBundle.swift; sourceTree = "<group>"; };
+		FE7B49DC09B09053B3F56299 /* ASRMemoryPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ASRMemoryPolicy.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -178,6 +182,7 @@
 			isa = PBXGroup;
 			children = (
 				2E77394DF1E55832CB7AE97C /* AppLinks.swift */,
+				783D7257FBE25B19EE75D0D5 /* GlassStyle.swift */,
 				838DDAEE0D078B1467FE22C6 /* OnboardingComponents.swift */,
 				A6CD471F980DD4DA248AD453 /* OnboardingView.swift */,
 				D71DFEE136E6B21006228AD4 /* SettingsView.swift */,
@@ -266,6 +271,7 @@
 			isa = PBXGroup;
 			children = (
 				189E726A738C75D79000175C /* ASRLanguageCatalog.swift */,
+				FE7B49DC09B09053B3F56299 /* ASRMemoryPolicy.swift */,
 				A4422223B1446F6D41C1C02D /* ASRModelCatalog.swift */,
 				C66534BB4ABAC51C70B79884 /* NativeASREngine.swift */,
 				2E765808965BEA8785CD4349 /* NativeASRService.swift */,
@@ -345,7 +351,6 @@
 				};
 			};
 			buildConfigurationList = F6821F58C308AC775B65E742 /* Build configuration list for PBXProject "VoiceScribe" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -359,6 +364,7 @@
 				6075783954004A11279DF7EE /* XCRemoteSwiftPackageReference "swift-transformers" */,
 			);
 			preferredProjectObjectVersion = 77;
+			productRefGroup = 1117211D31AD38584A9B3A8E /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -396,6 +402,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				013175B1525421D35FC3C36B /* AppLinks.swift in Sources */,
+				6504E0C378E7F65B2D7E9F31 /* GlassStyle.swift in Sources */,
 				C3F221DCBFFC3D51ACF33DB2 /* OnboardingComponents.swift in Sources */,
 				F4AAC9758E0B24D9CFD3EF9A /* OnboardingView.swift in Sources */,
 				BFABCD7045CD3D0E6005722F /* SettingsView.swift in Sources */,
@@ -409,6 +416,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CC7D67D01DD71351572E343A /* ASRLanguageCatalog.swift in Sources */,
+				529856007712FC4DAA637C64 /* ASRMemoryPolicy.swift in Sources */,
 				718BD829DAAC890E31F68190 /* ASRModelCatalog.swift in Sources */,
 				94B553A62A8C963752D7E278 /* AppDistribution.swift in Sources */,
 				011EE6815181B73F2BAF4BDF /* AppState.swift in Sources */,

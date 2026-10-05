@@ -370,6 +370,11 @@ struct GlassView: View {
     @ObservedObject private var appState = AppState.shared
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var transcriptAutoHideTask: Task<Void, Never>?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var hudForeground: Color { colorScheme == .dark ? .white : .black }
+    private var hudBacking: Color { colorScheme == .dark ? .black : .white }
     
     private var accentColor: Color {
         if appState.isRecording {
@@ -408,14 +413,7 @@ struct GlassView: View {
     }
     
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.black.opacity(0.86))
-
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-
-            HStack(spacing: 12) {
+        HStack(spacing: 12) {
                 ZStack {
                     Circle()
                         .fill(accentColor.opacity(0.2))
@@ -428,14 +426,14 @@ struct GlassView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(titleText.uppercased())
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.72))
+                        .foregroundStyle(hudForeground)
 
                     Text(displayStatusText)
                         .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.96))
+                        .foregroundStyle(hudForeground)
                         .lineLimit(1)
 
-                    if appState.status.contains("Loading") || appState.status.contains("Downloading") {
+                    if isPreparingModel {
                         ProgressView(value: appState.downloadProgress)
                             .progressViewStyle(.linear)
                             .tint(accentColor)
@@ -453,31 +451,33 @@ struct GlassView: View {
 
                         ZStack(alignment: .leading) {
                             Capsule()
-                                .fill(Color.white.opacity(0.14))
+                                .fill(Color.primary.opacity(0.12))
                             Capsule()
                                 .fill(accentColor.opacity(0.95))
                                 .frame(width: max(10, 76 * clampedAudioLevel))
-                                .animation(.linear(duration: 0.08), value: clampedAudioLevel)
+                                .animation(reduceMotion ? nil : .linear(duration: 0.08), value: clampedAudioLevel)
                         }
                         .frame(width: 76, height: 8)
                     } else {
                         Text("⌥ Space")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.9))
+                            .foregroundStyle(hudForeground)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 4)
                             .background(
                                 Capsule()
-                                    .fill(Color.white.opacity(0.14))
+                                    .fill(Color.primary.opacity(0.08))
                             )
                     }
                 }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .frame(width: Self.hudWidth, height: Self.hudHeight)
-        .background(Color.clear)
+        // Borderless floating panels need a legibility backing over their glass.
+        .background(hudBacking.opacity(0.72), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .voiceScribeGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .accessibilityElement(children: .combine)
         .onAppear {
             startInitializationIfNeeded()
         }
@@ -512,6 +512,11 @@ struct GlassView: View {
             transcriptAutoHideTask?.cancel()
             transcriptAutoHideTask = nil
         }
+    }
+
+    private var isPreparingModel: Bool {
+        let status = appState.status.lowercased()
+        return !appState.isReady && (status.contains("loading") || status.contains("download") || status.contains("prepar"))
     }
 
     private func startInitializationIfNeeded() {
