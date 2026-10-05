@@ -51,13 +51,15 @@ public class AppState: ObservableObject {
     private var recordingStartTask: Task<Void, Never>?
     private var transcriptionTask: Task<Void, Never>?
     private var statusResetTask: Task<Void, Never>?
+    private var recordingStarterOverride: (@MainActor () async throws -> Void)?
     
     public convenience init() {
         self.init(engine: Self.makeEngine())
     }
 
-    init(engine: NativeASRService) {
+    init(engine: NativeASRService, recordingStarter: (@MainActor () async throws -> Void)? = nil) {
         self.engine = engine
+        self.recordingStarterOverride = recordingStarter
         logger.info("🔧 AppState init")
         setupBindings()
         logger.info("🔧 AppState init complete")
@@ -206,7 +208,11 @@ public class AppState: ObservableObject {
             }
             do {
                 logger.info("🎙️ Calling recorder.startRecording()...")
-                try await recorder.startRecording()
+                if let recordingStarterOverride {
+                    try await recordingStarterOverride()
+                } else {
+                    try await recorder.startRecording()
+                }
                 guard interactionEpoch.isCurrent(epoch) else {
                     if recorder.isRecording {
                         _ = recorder.stopRecording()
@@ -214,6 +220,9 @@ public class AppState: ObservableObject {
                     return
                 }
                 logger.info("🎙️ recorder.startRecording() succeeded!")
+                // The pending stop begins a new interaction epoch. Finish this
+                // startup first so its guarded defer cannot leave the UI stuck.
+                isStartingRecording = false
                 isRecording = true
                 status = "🎤 Recording..."
                 errorMessage = nil
@@ -225,7 +234,6 @@ public class AppState: ObservableObject {
                 recordingStartTask = nil
             } catch {
                 guard interactionEpoch.isCurrent(epoch) else {
-                    recordingStartTask = nil
                     return
                 }
                 logger.error("🎙️ recorder.startRecording() FAILED: \(error.localizedDescription)")
