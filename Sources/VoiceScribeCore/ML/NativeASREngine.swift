@@ -130,15 +130,17 @@ public actor NativeASREngine {
     // MARK: - Public API
 
     public func setModel(_ name: String) async throws {
-        guard name != modelName else { return }
         guard Self.isAllowedModel(name) else {
             let error = ASRError.unsupportedModel(name)
             emit(.error(error.localizedDescription))
             emit(.status("Error: \(error.localizedDescription)"))
             throw error
         }
-        modelName = name
-        shutdown()
+        if name != modelName {
+            modelName = name
+            shutdown()
+        }
+        // A previously failed or idle-unloaded selection still needs preparation.
         try await loadModel()
     }
 

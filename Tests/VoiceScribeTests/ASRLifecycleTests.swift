@@ -25,7 +25,34 @@ private actor SuspendedDirectoryLoader {
     }
 }
 
+private actor FailingDirectoryLoader {
+    private(set) var calls = 0
+
+    func load() throws -> URL {
+        calls += 1
+        throw ASRError.modelLoadFailed("Simulated interrupted download")
+    }
+}
+
 final class ASRLifecycleTests: XCTestCase {
+    func testSelectingSameModelRetriesFailedPreparation() async throws {
+        let loader = FailingDirectoryLoader()
+        let engine = NativeASREngine(config: .qwen3ASR_1_7B_4bit, modelDirectoryLoader: { _, _ in
+            try await loader.load()
+        })
+        for _ in 0..<2 {
+            do {
+                try await engine.setModel("mlx-community/Qwen3-ASR-0.6B-8bit")
+                XCTFail("Failed preparation must propagate its error on every attempt")
+            } catch {
+                XCTAssertFalse(error is CancellationError)
+            }
+        }
+        let calls = await loader.calls
+        XCTAssertEqual(calls, 2, "Retry must call the loader again for the already selected model")
+        await engine.shutdown()
+    }
+
     func testShutdownInvalidatesSuspendedModelLoad() async throws {
         let loader = SuspendedDirectoryLoader()
         let engine = NativeASREngine(config: .qwen3ASR_1_7B_8bit, modelDirectoryLoader: { _, _ in
