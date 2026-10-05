@@ -576,6 +576,7 @@
 				PRODUCT_NAME = VoiceScribeCore;
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) VOICESCRIBE_APP_STORE";
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Release;
@@ -659,6 +660,7 @@
 				PRODUCT_NAME = VoiceScribeCore;
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) VOICESCRIBE_APP_STORE";
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Debug;

@@ -40,6 +40,7 @@ targets:
         DEBUG_INFORMATION_FORMAT: dwarf
         GENERATE_INFOPLIST_FILE: YES
         SKIP_INSTALL: YES
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) VOICESCRIBE_APP_STORE
   VoiceScribeAppStore:
     type: application
     platform: macOS
