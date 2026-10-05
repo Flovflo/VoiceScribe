@@ -132,8 +132,13 @@ private struct SpeechModelSection: View {
                     ForEach(ASRModelCatalog.quickChoices) { model in
                         Button(action: { selectedModel = model.id }) {
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(model.title.replacingOccurrences(of: "Qwen3-ASR ", with: ""))
-                                    .font(.system(size: 12, weight: .semibold))
+                                HStack(spacing: 4) {
+                                    Text(model.title.replacingOccurrences(of: "Qwen3-ASR ", with: ""))
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .opacity(selectedModel == model.id ? 1 : 0)
+                                        .accessibilityHidden(true)
+                                }
+                                .font(.system(size: 12, weight: .semibold))
                                 Text(model.quantization.uppercased())
                                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                                     .foregroundColor(.secondary)
@@ -150,6 +155,7 @@ private struct SpeechModelSection: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityAddTraits(selectedModel == model.id ? .isSelected : [])
                     }
                   }
                 }

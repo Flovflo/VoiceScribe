@@ -333,8 +333,13 @@ private struct StepAccessoryView: View {
                             selectedModel = model.id
                         } label: {
                             VStack(spacing: 2) {
-                                Text(model.title.replacingOccurrences(of: "Qwen3-ASR ", with: ""))
-                                    .font(.system(size: 11, weight: .semibold))
+                                HStack(spacing: 4) {
+                                    Text(model.title.replacingOccurrences(of: "Qwen3-ASR ", with: ""))
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .opacity(selectedModel == model.id ? 1 : 0)
+                                        .accessibilityHidden(true)
+                                }
+                                .font(.system(size: 11, weight: .semibold))
                                 Text(model.quantization.uppercased())
                                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                                     .foregroundStyle(.secondary)
@@ -348,6 +353,7 @@ private struct StepAccessoryView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityAddTraits(selectedModel == model.id ? .isSelected : [])
                     }
                   }
                 }
