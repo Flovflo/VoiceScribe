@@ -95,3 +95,18 @@ extension ASRLifecycleTests {
         XCTAssertEqual(NativeASREngine.cachedModelDirectory("test/model", root: root)?.path, directory.path)
     }
 }
+
+extension ASRLifecycleTests {
+    @MainActor
+    func testCancelledModelLoadDoesNotPublishServiceError() async throws {
+        let loader = SuspendedDirectoryLoader()
+        let engine = NativeASREngine(config: .qwen3ASR_1_7B_8bit, modelDirectoryLoader: { _, _ in await loader.load() })
+        let service = NativeASRService(engine: engine)
+        let loading = Task { try await service.loadModel() }
+        try await loader.waitForCalls(1)
+        await engine.shutdown()
+        await loader.resumeFirst()
+        _ = try? await loading.value
+        XCTAssertNil(service.lastError, "Invalidated work must not overwrite UI error state")
+    }
+}
