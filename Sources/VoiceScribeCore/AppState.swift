@@ -201,7 +201,9 @@ public class AppState: ObservableObject {
         let epoch = interactionEpoch.begin()
 
         let task = Task { [self] in
-            defer { isStartingRecording = false }
+            defer {
+                if interactionEpoch.isCurrent(epoch) { isStartingRecording = false }
+            }
             do {
                 logger.info("🎙️ Calling recorder.startRecording()...")
                 try await recorder.startRecording()
@@ -246,21 +248,21 @@ public class AppState: ObservableObject {
         statusResetTask?.cancel()
         statusResetTask = nil
 
-        let samples = recorder.stopRecording()
         isRecording = false
         status = "Processing..."
         errorMessage = nil
         transcript = ""
         
-        logger.info("🎙️ Got \(samples.count) samples")
-        
-        guard !samples.isEmpty else {
-            status = "No audio"
-            return
-        }
-
         let sampleRate = recorder.outputSampleRate
         let task = Task { [self] in
+            let samples = await recorder.stopRecordingAndResample()
+            guard interactionEpoch.isCurrent(epoch), !Task.isCancelled else { return }
+            guard !samples.isEmpty else {
+                status = "No audio"
+                transcriptionTask = nil
+                scheduleStatusReset(for: epoch)
+                return
+            }
             logger.info("🎙️ Calling engine.transcribe()...")
             do {
                 let text = try await engine.transcribe(
@@ -268,7 +270,6 @@ public class AppState: ObservableObject {
                     sampleRate: sampleRate
                 )
                 guard interactionEpoch.isCurrent(epoch) else {
-                    transcriptionTask = nil
                     return
                 }
                 logger.info("🎙️ Transcription result: \(text.prefix(50))...")
@@ -291,7 +292,6 @@ public class AppState: ObservableObject {
                 }
             } catch {
                 guard interactionEpoch.isCurrent(epoch) else {
-                    transcriptionTask = nil
                     return
                 }
                 logger.error("Transcription error: \(error.localizedDescription)")
@@ -326,7 +326,6 @@ public class AppState: ObservableObject {
         statusResetTask = Task { [self] in
             try? await Task.sleep(for: .seconds(2))
             guard interactionEpoch.isCurrent(epoch) else {
-                statusResetTask = nil
                 return
             }
             if !isRecording {
