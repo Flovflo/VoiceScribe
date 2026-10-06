@@ -53,7 +53,14 @@ final class ASRKernelParityTests: XCTestCase {
             var config = Qwen2Configuration(hiddenSize: dimensions, hiddenLayers: 0, intermediateSize: 256, attentionHeads: 1, rmsNormEps: 1e-6, vocabularySize: 16, kvHeads: 1)
             if scale != 1 { config.ropeScaling = ["type": .string("linear"), "factor": .number(1 / scale)] }
             let fused = Qwen2Attention(config).applyRotaryEmbedding(input, offset: offset)
-            XCTAssertLessThanOrEqual(abs(fused - reference).max().item(Float.self), 0.0005, "offset=\(offset) length=\(length) scale=\(scale)")
+            XCTAssertEqual(fused.dtype, .float32)
+            // RoPE uses exp2(log2(base)) and Metal fast trig; the independent
+            // reference uses pow and separate trig operations. Their Float32
+            // phase rounding grows with the cached position. Keep the short-
+            // sequence bound and allow two epsilon units per scaled position.
+            let maxPosition = Float(offset + length - 1) * scale
+            let tolerance = max(Float(0.0005), 2 * Float.ulpOfOne * maxPosition)
+            XCTAssertLessThanOrEqual(abs(fused - reference).max().item(Float.self), tolerance, "offset=\(offset) length=\(length) scale=\(scale)")
         } } }
     }
 }

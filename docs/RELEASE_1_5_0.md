@@ -27,6 +27,8 @@ CI now produces explicitly unsigned preview artifacts and cannot publish public 
 
 CI tests compile MLX shaders with Xcode in an isolated standalone copy of the package sources, tests and locked manifest. This avoids selecting the repository's App Store project or excluding dependency tests. The test helper selects the library built with the dependency and excludes system-private and stale working-directory copies. A hosted GPU parity failure exposed the incompatible system-library fallback; the signed app already packages its matching build output.
 
+Rotary-embedding parity retains a `0.0005` bound at short offsets and permits two Float32 epsilon units per scaled cached position at long offsets. The independent `pow`/trig reference and MLX's `exp2(log2(base))`/fast-trig kernel have different phase rounding. The hosted runner measured `0.00068324804` at offset 4096 and length 31, within the resulting `0.0009837151` budget; all other cases already passed the tighter bound. No inference code was changed for this test portability adjustment.
+
 Secret scanning and push protection are enabled. Dependabot alerts and automated security updates were enabled during this release. Initial API readbacks returned no open secret/dependency alerts; that does not establish an exhaustive fresh dependency scan.
 
 GitHub release immutability is enabled: publication locks this release's tag and assets and generates a release attestation. `main` is protected against force pushes and deletion, including administrator pushes. These controls do not claim that every account, dependency or branch change has been independently reviewed.
