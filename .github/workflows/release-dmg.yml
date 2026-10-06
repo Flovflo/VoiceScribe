@@ -1,5 +1,7 @@
-name: Release
+name: Release preview validation
 
+# Public releases are uploaded only after local Developer ID signing,
+# notarization, stapling and Gatekeeper verification. CI previews cannot publish.
 on:
   push:
     tags:
@@ -7,103 +9,68 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v1.3.0)"
+        description: "Preview version tag (e.g. v1.5.0); no public release is published"
         required: true
         type: string
-      prerelease:
-        description: "Publish as prerelease"
-        required: false
-        default: false
-        type: boolean
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-preview-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  verify:
-    runs-on: macos-14
-
+  build-preview:
+    runs-on: macos-26
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Select Xcode (Swift 6)
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          xcode-version: latest-stable
-
+          persist-credentials: false
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@1242409711ff5721add51979e9e11e23ebb7e5a4 # v1
+        with:
+          xcode-version: "26.6"
+      - name: Install Metal Toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
       - name: Run tests
         run: swift test
-
-      - name: Build release (arm64)
-        run: swift build -c release --arch arm64
-
-  build-and-release:
-    needs: verify
-    runs-on: macos-14
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Select Xcode (Swift 6)
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
-
-      - name: Resolve tag/version
+      - name: Resolve preview version
         id: vars
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_TAG: ${{ github.ref_name }}
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.tag }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
           else
-            TAG="${{ github.ref_name }}"
+            TAG="$REF_TAG"
           fi
-
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.].+)?$ ]]; then
-            echo "Tag must follow semantic versioning prefixed by v (example: v1.3.0)."
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version tag."
             exit 1
           fi
-
-          VERSION="${TAG#v}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Build DMG
-        shell: bash
+          printf 'tag=%s\nversion=%s\n' "$TAG" "${TAG#v}" >> "$GITHUB_OUTPUT"
+      - name: Build unsigned preview DMG
+        env:
+          PREVIEW_TAG: ${{ steps.vars.outputs.tag }}
+        run: ./scripts/build_dmg.sh "$PREVIEW_TAG"
+      - name: Build unsigned preview ZIP
+        env:
+          PREVIEW_VERSION: ${{ steps.vars.outputs.version }}
         run: |
-          ./scripts/build_dmg.sh "${{ steps.vars.outputs.tag }}"
-
-      - name: Build ZIP
-        shell: bash
-        run: |
-          ZIP_PATH="dist/VoiceScribe-${{ steps.vars.outputs.version }}.zip"
-          ditto -c -k --sequesterRsrc --keepParent "VoiceScribe.app" "$ZIP_PATH"
+          ZIP_PATH="dist/VoiceScribe-${PREVIEW_VERSION}.zip"
+          ditto -c -k --sequesterRsrc --keepParent VoiceScribe.app "$ZIP_PATH"
           shasum -a 256 "$ZIP_PATH" | awk '{print $1}' > "$ZIP_PATH.sha256"
-
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload unsigned preview artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: VoiceScribe-${{ steps.vars.outputs.version }}-release-assets
+          name: VoiceScribe-${{ steps.vars.outputs.version }}-unsigned-preview
           path: |
             dist/VoiceScribe-${{ steps.vars.outputs.version }}.dmg
             dist/VoiceScribe-${{ steps.vars.outputs.version }}.dmg.sha256
             dist/VoiceScribe-${{ steps.vars.outputs.version }}.zip
             dist/VoiceScribe-${{ steps.vars.outputs.version }}.zip.sha256
-
-      - name: Publish GitHub release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.vars.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          generate_release_notes: true
-          prerelease: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.prerelease || false }}
-          files: |
-            dist/VoiceScribe-${{ steps.vars.outputs.version }}.dmg
-            dist/VoiceScribe-${{ steps.vars.outputs.version }}.dmg.sha256
-            dist/VoiceScribe-${{ steps.vars.outputs.version }}.zip
-            dist/VoiceScribe-${{ steps.vars.outputs.version }}.zip.sha256
-          fail_on_unmatched_files: true
