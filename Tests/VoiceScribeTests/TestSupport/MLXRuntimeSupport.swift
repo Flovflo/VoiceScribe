@@ -1,26 +1,18 @@
 import Foundation
+import MLX
 import XCTest
 
-/// Ensure MLX runtime metallib exists at the default runtime lookup location.
-/// Returns destination URL in current working directory if available.
+private final class MLXTestBundleMarker: NSObject {}
+
+/// Load the shaders built with this test executable's MLX dependency.
+/// System-private and previously copied libraries can have incompatible kernels.
 @discardableResult
 func ensureMLXRuntimeMetallibAvailable() throws -> URL {
-    let destination = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent("default.metallib")
-
-    if FileManager.default.fileExists(atPath: destination.path) {
-        return destination
-    }
-
     let candidates = mlxMetalLibrarySourceCandidates()
     for source in candidates {
         guard FileManager.default.fileExists(atPath: source.path) else { continue }
-        do {
-            try FileManager.default.copyItem(at: source, to: destination)
-            return destination
-        } catch {
-            continue
-        }
+        GPU.metallib = source
+        return source
     }
 
     let preview = candidates.prefix(5).map(\.path).joined(separator: ", ")
@@ -35,19 +27,16 @@ func mlxMetalLibrarySourceCandidates() -> [URL] {
         urls.append(URL(fileURLWithPath: explicit))
     }
 
+    let products = Bundle(for: MLXTestBundleMarker.self).bundleURL.deletingLastPathComponent()
+    let mlxBundle = products.appendingPathComponent("mlx-swift_Cmlx.bundle", isDirectory: true)
+    urls.append(mlxBundle.appendingPathComponent("Contents/Resources/default.metallib"))
+    urls.append(mlxBundle.appendingPathComponent("default.metallib"))
+
     if let executableDir = Bundle.main.executableURL?.deletingLastPathComponent() {
         urls.append(executableDir.appendingPathComponent("mlx.metallib"))
         urls.append(executableDir.appendingPathComponent("Resources/mlx.metallib"))
         urls.append(executableDir.appendingPathComponent("Resources/default.metallib"))
     }
-
-    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-    urls.append(cwd.appendingPathComponent("mlx.metallib"))
-    urls.append(cwd.appendingPathComponent("default.metallib"))
-
-    // Known macOS-provided MLX metallib locations.
-    urls.append(URL(fileURLWithPath: "/System/Library/PrivateFrameworks/CorePhotogrammetry.framework/Versions/A/Resources/mlx.metallib"))
-    urls.append(URL(fileURLWithPath: "/System/Library/PrivateFrameworks/GESS.framework/Versions/A/Resources/mlx.metallib"))
 
     // Mirror SWIFTPM_BUNDLE lookup in mlx-swift C++ runtime when available.
     for bundle in Bundle.allBundles + Bundle.allFrameworks {
