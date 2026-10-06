@@ -16,6 +16,16 @@ BUNDLE_ID="${VOICESCRIBE_BUNDLE_ID:-com.voicescribe.app}"
 MIN_MACOS_VERSION="${VOICESCRIBE_MIN_MACOS_VERSION:-14.0}"
 SKIP_BUILD="${VOICESCRIBE_SKIP_BUILD:-0}"
 SIGN_IDENTITY="${VOICESCRIBE_CODESIGN_IDENTITY:--}"
+REQUIRE_DEVELOPER_ID="${VOICESCRIBE_REQUIRE_DEVELOPER_ID:-0}"
+
+# Public releases must not silently fall back to an ad-hoc/development signature.
+if [ "$REQUIRE_DEVELOPER_ID" = "1" ]; then
+    if [ "$SIGN_IDENTITY" = "-" ] || ! security find-identity -v -p codesigning |
+        rg --fixed-strings -- "$SIGN_IDENTITY" | rg --quiet '"Developer ID Application:'; then
+        echo "❌ A valid Developer ID Application identity and private key are required."
+        exit 1
+    fi
+fi
 
 find_mlx_metallib_source() {
     local candidates=()
@@ -209,6 +219,11 @@ EOF
 echo "✍️ Signing Bundle..."
 chmod -R u+w "$APP_BUNDLE"
 xattr -cr "$APP_BUNDLE"
-codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
+SIGN_ARGS=(--force --deep --sign "$SIGN_IDENTITY")
+if [ "$SIGN_IDENTITY" != "-" ]; then
+    SIGN_ARGS+=(--options runtime --timestamp --entitlements "$SRC_ROOT/Distribution/VoiceScribeDeveloperID.entitlements")
+fi
+codesign "${SIGN_ARGS[@]}" "$APP_BUNDLE"
+codesign --verify --deep --strict "$APP_BUNDLE"
 
 echo "✅ App Packaged: $APP_BUNDLE"
