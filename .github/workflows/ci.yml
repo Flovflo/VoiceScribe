@@ -38,15 +38,12 @@ jobs:
         # Xcode compiles MLX's matching Metal shaders; Swift 6.3's command-line
         # SwiftPM build does not. Never substitute a system-private metallib.
         run: |
-          workspace="$RUNNER_TEMP/VoiceScribe-Package.xcworkspace"
-          mkdir -p "$workspace"
-          cat > "$workspace/contents.xcworkspacedata" <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <Workspace version="1.0">
-            <FileRef location="absolute:$GITHUB_WORKSPACE"></FileRef>
-          </Workspace>
-          EOF
-          xcodebuild test -workspace "$workspace" -scheme VoiceScribe -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/VoiceScribe-CI" CODE_SIGNING_ALLOWED=NO
+          package="$RUNNER_TEMP/VoiceScribe-Package"
+          mkdir -p "$package"
+          cp Package.swift Package.resolved "$package/"
+          cp -R Sources Tests "$package/"
+          cd "$package"
+          xcodebuild test -scheme VoiceScribe-Package -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/VoiceScribe-CI" CODE_SIGNING_ALLOWED=NO
 
       - name: Build release (arm64)
         run: swift build -c release --arch arm64

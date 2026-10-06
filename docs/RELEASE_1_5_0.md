@@ -25,7 +25,7 @@ Independent static product review found no outbound audio/transcript upload or P
 
 CI now produces explicitly unsigned preview artifacts and cannot publish public releases. The old release workflow is disabled on GitHub until the fixed workflow reaches the default branch; this also prevents it from replacing verified local release assets. CI was moved from Xcode 16.2/Swift 6.0 to a macOS 26/Xcode 26.6 runner compatible with MLX's Swift 6.3 tools requirement.
 
-CI tests compile MLX shaders with Xcode in an explicit package workspace. The test helper selects the library built with the dependency and excludes system-private and stale working-directory copies. A hosted GPU parity failure exposed the incompatible system-library fallback; the signed app already packages its matching build output.
+CI tests compile MLX shaders with Xcode in an isolated standalone copy of the package sources, tests and locked manifest. This avoids selecting the repository's App Store project or excluding dependency tests. The test helper selects the library built with the dependency and excludes system-private and stale working-directory copies. A hosted GPU parity failure exposed the incompatible system-library fallback; the signed app already packages its matching build output.
 
 Secret scanning and push protection are enabled. Dependabot alerts and automated security updates were enabled during this release. Initial API readbacks returned no open secret/dependency alerts; that does not establish an exhaustive fresh dependency scan.
 
