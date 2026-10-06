@@ -14,7 +14,7 @@ private final class MicrophonePermissionRequest: @unchecked Sendable {
 
     func install(_ continuation: CheckedContinuation<Bool, Never>) {
         let result = lock.withLock { () -> Bool? in
-            if let result { return result }
+            if let result = self.result { return result }
             self.continuation = continuation
             return nil as Bool?
         }
