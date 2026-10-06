@@ -12,12 +12,9 @@ import MLXNN
 // MARK: - Helper Classes
 
 @inline(__always)
-private func applyRMSNorm(_ input: MLXArray, norm: RMSNorm) -> MLXArray {
-    let x32 = input.asType(.float32)
-    let featureAxis = x32.ndim - 1
-    let variance = mean(square(x32), axis: featureAxis, keepDims: true)
-    let normalized = x32 * rsqrt(variance + MLXArray(Float(norm.eps)))
-    return normalized * norm.weight.asType(.float32)
+func applyRMSNorm(_ input: MLXArray, norm: RMSNorm) -> MLXArray {
+    // Preserve the existing float32 inference path while fusing normalization and scaling.
+    MLXFast.rmsNorm(input.asType(.float32), weight: norm.weight.asType(.float32), eps: norm.eps)
 }
 
 public class QwenKVCache {
@@ -87,7 +84,6 @@ class Qwen2Attention: Module {
     @ModuleInfo(key: "q_norm") var qNorm: RMSNorm
     @ModuleInfo(key: "k_norm") var kNorm: RMSNorm
 
-    let invFreqData: [Float]
     let ropeScale: Float
 
     private func createAdditiveCausalMask(queryLen: Int, offset: Int) -> MLXArray {
@@ -128,38 +124,18 @@ class Qwen2Attention: Module {
             ropeScale = 1
         }
         self.ropeScale = ropeScale
-        let half = max(1, headDim / 2)
-        let base = max(args.ropeTheta, 1)
-        var inv = [Float]()
-        inv.reserveCapacity(half)
-        for i in 0..<half {
-            inv.append(1.0 / pow(base, Float(i) / Float(half)))
-        }
-        self.invFreqData = inv
     }
 
-    private func applyRotaryEmbedding(_ x: MLXArray, offset: Int) -> MLXArray {
+    func applyRotaryEmbedding(_ x: MLXArray, offset: Int) -> MLXArray {
         let sequenceLength = x.dim(2)
         if sequenceLength <= 0 || headDim < 2 {
             return x
         }
 
-        var positions = MLXArray(Int32(offset) ..< Int32(offset + sequenceLength)).asType(.float32)
-        if ropeScale != 1 {
-            positions = positions * MLXArray(ropeScale)
-        }
-
-        let invFreq = MLXArray(invFreqData, [max(1, headDim / 2)]).asType(.float32)
-        let freqs = positions.expandedDimensions(axis: 1) * invFreq.expandedDimensions(axis: 0)
-        let emb = concatenated([freqs, freqs], axis: 1).asType(x.dtype)
-        let cosEmb = cos(emb).expandedDimensions(axis: 0).expandedDimensions(axis: 0)
-        let sinEmb = sin(emb).expandedDimensions(axis: 0).expandedDimensions(axis: 0)
-
-        let half = headDim / 2
-        let firstHalf = x[0..., 0..., 0..., ..<half]
-        let secondHalf = x[0..., 0..., 0..., half...]
-        let rotated = concatenated([(-secondHalf), firstHalf], axis: -1)
-        return (x * cosEmb) + (rotated * sinEmb)
+        return MLXFast.RoPE(
+            x, dimensions: headDim, traditional: false, base: max(args.ropeTheta, 1),
+            scale: ropeScale, offset: offset
+        )
     }
 
     public func callAsFunction(

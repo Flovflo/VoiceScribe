@@ -45,14 +45,21 @@ public class AppState: ObservableObject {
     
     private var cancellables = Set<AnyCancellable>()
     private var isInitializing = false
+    private var initializationGeneration: UInt64 = 0
     private var stopRequestedWhileStarting = false
     private var interactionEpoch = AsyncOperationEpoch()
     private var recordingStartTask: Task<Void, Never>?
     private var transcriptionTask: Task<Void, Never>?
     private var statusResetTask: Task<Void, Never>?
+    private var recordingStarterOverride: (@MainActor () async throws -> Void)?
     
-    public init() {
-        self.engine = Self.makeEngine()
+    public convenience init() {
+        self.init(engine: Self.makeEngine())
+    }
+
+    init(engine: NativeASRService, recordingStarter: (@MainActor () async throws -> Void)? = nil) {
+        self.engine = engine
+        self.recordingStarterOverride = recordingStarter
         logger.info("🔧 AppState init")
         setupBindings()
         logger.info("🔧 AppState init complete")
@@ -61,28 +68,26 @@ public class AppState: ObservableObject {
     private func setupBindings() {
         recorder.$audioLevel
             .receive(on: DispatchQueue.main)
-            .assign(to: \.audioLevel, on: self)
-            .store(in: &cancellables)
+            .removeDuplicates()
+            .assign(to: &$audioLevel)
 
         recorder.$availableInputDevices
             .receive(on: DispatchQueue.main)
-            .assign(to: \.availableInputDevices, on: self)
-            .store(in: &cancellables)
+            .assign(to: &$availableInputDevices)
 
         recorder.$selectedInputDeviceUID
             .receive(on: DispatchQueue.main)
-            .assign(to: \.selectedInputDeviceUID, on: self)
-            .store(in: &cancellables)
+            .assign(to: &$selectedInputDeviceUID)
         
         engine.$status
             .receive(on: DispatchQueue.main)
-            .assign(to: \.status, on: self)
-            .store(in: &cancellables)
+            .removeDuplicates()
+            .assign(to: &$status)
         
         engine.$isReady
             .receive(on: DispatchQueue.main)
-            .assign(to: \.isReady, on: self)
-            .store(in: &cancellables)
+            .removeDuplicates()
+            .assign(to: &$isReady)
         
         // NativeEngine provides Double progress 0.0-1.0
         engine.$loadProgress
@@ -95,8 +100,7 @@ public class AppState: ObservableObject {
         
         engine.$lastError
             .receive(on: DispatchQueue.main)
-            .assign(to: \.errorMessage, on: self)
-            .store(in: &cancellables)
+            .assign(to: &$errorMessage)
     }
     
     // MARK: - Lifecycle
@@ -105,7 +109,11 @@ public class AppState: ObservableObject {
         guard !isInitializing else { return }
         guard !isReady else { return }
         isInitializing = true
-        defer { isInitializing = false }
+        initializationGeneration &+= 1
+        let generation = initializationGeneration
+        defer {
+            if generation == initializationGeneration { isInitializing = false }
+        }
 
         logger.info("🔧 initialize() called")
         let selectedModel = modelID
@@ -117,12 +125,14 @@ public class AppState: ObservableObject {
         errorMessage = nil
         do {
             await engine.setPreferredLanguageAndWait(Self.storedPreferredLanguage())
+            guard generation == initializationGeneration, !Task.isCancelled else { return }
             if selectedModel == ASRModelCatalog.defaultModelID {
                 try await engine.loadModel()
             } else {
                 try await engine.setModelAndWait(selectedModel)
             }
         } catch {
+            guard generation == initializationGeneration, !(error is CancellationError) else { return }
             status = "Model Error"
             errorMessage = error.localizedDescription
         }
@@ -131,6 +141,8 @@ public class AppState: ObservableObject {
 
     public func shutdown() {
         logger.info("🔧 shutdown() called")
+        initializationGeneration &+= 1
+        isInitializing = false
         invalidatePendingInteractionWork()
         if recorder.isRecording {
             _ = recorder.stopRecording()
@@ -191,10 +203,16 @@ public class AppState: ObservableObject {
         let epoch = interactionEpoch.begin()
 
         let task = Task { [self] in
-            defer { isStartingRecording = false }
+            defer {
+                if interactionEpoch.isCurrent(epoch) { isStartingRecording = false }
+            }
             do {
                 logger.info("🎙️ Calling recorder.startRecording()...")
-                try await recorder.startRecording()
+                if let recordingStarterOverride {
+                    try await recordingStarterOverride()
+                } else {
+                    try await recorder.startRecording()
+                }
                 guard interactionEpoch.isCurrent(epoch) else {
                     if recorder.isRecording {
                         _ = recorder.stopRecording()
@@ -202,6 +220,9 @@ public class AppState: ObservableObject {
                     return
                 }
                 logger.info("🎙️ recorder.startRecording() succeeded!")
+                // The pending stop begins a new interaction epoch. Finish this
+                // startup first so its guarded defer cannot leave the UI stuck.
+                isStartingRecording = false
                 isRecording = true
                 status = "🎤 Recording..."
                 errorMessage = nil
@@ -213,7 +234,6 @@ public class AppState: ObservableObject {
                 recordingStartTask = nil
             } catch {
                 guard interactionEpoch.isCurrent(epoch) else {
-                    recordingStartTask = nil
                     return
                 }
                 logger.error("🎙️ recorder.startRecording() FAILED: \(error.localizedDescription)")
@@ -236,21 +256,21 @@ public class AppState: ObservableObject {
         statusResetTask?.cancel()
         statusResetTask = nil
 
-        let samples = recorder.stopRecording()
         isRecording = false
         status = "Processing..."
         errorMessage = nil
         transcript = ""
         
-        logger.info("🎙️ Got \(samples.count) samples")
-        
-        guard !samples.isEmpty else {
-            status = "No audio"
-            return
-        }
-
         let sampleRate = recorder.outputSampleRate
         let task = Task { [self] in
+            let samples = await recorder.stopRecordingAndResample()
+            guard interactionEpoch.isCurrent(epoch), !Task.isCancelled else { return }
+            guard !samples.isEmpty else {
+                status = "No audio"
+                transcriptionTask = nil
+                scheduleStatusReset(for: epoch)
+                return
+            }
             logger.info("🎙️ Calling engine.transcribe()...")
             do {
                 let text = try await engine.transcribe(
@@ -258,7 +278,6 @@ public class AppState: ObservableObject {
                     sampleRate: sampleRate
                 )
                 guard interactionEpoch.isCurrent(epoch) else {
-                    transcriptionTask = nil
                     return
                 }
                 logger.info("🎙️ Transcription result: \(text.prefix(50))...")
@@ -281,7 +300,6 @@ public class AppState: ObservableObject {
                 }
             } catch {
                 guard interactionEpoch.isCurrent(epoch) else {
-                    transcriptionTask = nil
                     return
                 }
                 logger.error("Transcription error: \(error.localizedDescription)")
@@ -316,7 +334,6 @@ public class AppState: ObservableObject {
         statusResetTask = Task { [self] in
             try? await Task.sleep(for: .seconds(2))
             guard interactionEpoch.isCurrent(epoch) else {
-                statusResetTask = nil
                 return
             }
             if !isRecording {

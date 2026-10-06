@@ -34,7 +34,8 @@ public class Qwen3ASR: Module {
         language: String?,
         context: String = "",
         maxTokens: Int = 448
-    ) -> String {
+    ) throws -> String {
+        try Task.checkCancellation()
         var audioEmbeds = encodeAudio(audioFeatures)
         if ProcessInfo.processInfo.environment["VOICESCRIBE_REPEAT_AUDIO_ENCODE"] == "1" {
             if ProcessInfo.processInfo.environment["VOICESCRIBE_DEBUG_AUDIO_WEIGHT_DRIFT"] == "1" {
@@ -142,61 +143,28 @@ public class Qwen3ASR: Module {
         var logits = languageModel.forwardWithEmbeddings(inputsEmbeds, cache: useNoCache ? nil : cache)
 
         let lastLogits = logits[0, -1, 0...]
-        var nextToken = Self.selectNextToken(
+        let nextToken = Self.selectNextToken(
             logits: lastLogits,
             hardExcluded: []
         )
         MLX.eval(logits)
 
-        var generatedTokenIDs: [Int] = []
-        generatedTokenIDs.reserveCapacity(maxTokens)
         let stopTokens = Set([tokenizer.eosTokenId, 151643, 151645].compactMap { $0 })
-        let minTokensBeforeAllowingStop = 8
-        if stopTokens.contains(nextToken) {
-            let forced = Self.selectNextToken(
-                logits: lastLogits,
-                hardExcluded: stopTokens
-            )
-            if !stopTokens.contains(forced) {
-                nextToken = forced
-            }
-        }
-        var repeatedRun = 0
-        var previousToken = -1
-
-        for _ in 0..<maxTokens {
-            // Let the model stop naturally as soon as it emits an end token.
-            if stopTokens.contains(nextToken), generatedTokenIDs.count >= minTokensBeforeAllowingStop {
-                break
-            }
-
-            generatedTokenIDs.append(nextToken)
-            if nextToken == previousToken {
-                repeatedRun += 1
-            } else {
-                repeatedRun = 1
-            }
-            previousToken = nextToken
-            if repeatedRun >= 32 {
-                break
-            }
-
+        let generatedTokenIDs = try Self.decodeTokens(
+            initialToken: nextToken, stopTokens: stopTokens, maxTokens: maxTokens
+        ) { token in
             if useNoCache {
-                let nextInput = MLXArray([nextToken]).reshaped(1, 1)
+                let nextInput = MLXArray([token]).reshaped(1, 1)
                 let nextEmbed = languageModel.embed(nextInput)
                 runningEmbeds = MLX.concatenated([runningEmbeds, nextEmbed], axis: 1)
                 logits = languageModel.forwardWithEmbeddings(runningEmbeds, cache: nil)
             } else {
-                let nextInput = MLXArray([nextToken]).reshaped(1, 1)
+                let nextInput = MLXArray([token]).reshaped(1, 1)
                 logits = languageModel(nextInput, cache: cache)
             }
-
-            let nextLogits = logits[0, -1, 0...]
-            nextToken = Self.selectNextToken(
-                logits: nextLogits,
-                hardExcluded: []
-            )
+            let nextToken = Self.selectNextToken(logits: logits[0, -1, 0...], hardExcluded: [])
             MLX.eval(logits)
+            return nextToken
         }
 
         if generatedTokenIDs.isEmpty {
@@ -209,7 +177,30 @@ public class Qwen3ASR: Module {
         return decoded
     }
 
-    private static func mergingAudioEmbeddings(
+    static func decodeTokens(
+        initialToken: Int, stopTokens: Set<Int>, maxTokens: Int,
+        nextToken: (Int) throws -> Int
+    ) throws -> [Int] {
+        var token = initialToken
+        var tokens = [Int]()
+        var previousToken = -1
+        var repeatedRun = 0
+        try Task.checkCancellation()
+        guard maxTokens > 0 else { return [] }
+        tokens.reserveCapacity(maxTokens)
+        for _ in 0..<maxTokens {
+            try Task.checkCancellation()
+            if stopTokens.contains(token) { break }
+            tokens.append(token)
+            repeatedRun = token == previousToken ? repeatedRun + 1 : 1
+            previousToken = token
+            if repeatedRun >= 32 || tokens.count == maxTokens { break }
+            token = try nextToken(token)
+        }
+        return tokens
+    }
+
+    static func mergingAudioEmbeddings(
         tokenIDs: [Int],
         baseEmbeddings: MLXArray,
         audioEmbeddings: MLXArray,
@@ -223,8 +214,21 @@ public class Qwen3ASR: Module {
         }
 
         let replacements = min(audioTokenPositions.count, audioEmbeddings.dim(1))
+        guard replacements > 0 else { return baseEmbeddings }
         let seqLen = baseEmbeddings.dim(1)
         let hiddenSize = baseEmbeddings.dim(2)
+        let start = audioTokenPositions[0]
+        if audioTokenPositions.prefix(replacements).enumerated().allSatisfy({ $0.element == start + $0.offset }) {
+            // Normal prompts contain one contiguous audio-pad span. Build three slices
+            // instead of allocating a scatter-update graph for every audio token.
+            var segments = [MLXArray]()
+            if start > 0 { segments.append(baseEmbeddings[0..., ..<start, 0...]) }
+            segments.append(audioEmbeddings[0..., ..<replacements, 0...])
+            if start + replacements < seqLen {
+                segments.append(baseEmbeddings[0..., (start + replacements)..., 0...])
+            }
+            return concatenated(segments, axis: 1)
+        }
         let mergedFlat = baseEmbeddings.reshaped(seqLen, hiddenSize)
         for i in 0..<replacements {
             let tokenIndex = audioTokenPositions[i]

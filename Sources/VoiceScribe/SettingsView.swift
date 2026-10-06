@@ -24,7 +24,7 @@ struct SettingsView: View {
 
     private var selectedModelLabel: String {
         if let option = ASRModelCatalog.supportedModels.first(where: { $0.id == selectedModel }) {
-            return "\(option.title) • \(option.quantization)"
+            return "\(option.title) • \(option.quantization) • \(option.sizeLabel)"
         }
         return selectedModel
     }
@@ -61,6 +61,16 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.trailing)
                 }
+                if appState.isModelDownloading {
+                    ProgressView(value: appState.downloadProgress)
+                }
+                if let error = appState.errorMessage {
+                    Text(error).foregroundStyle(.red).font(.caption)
+                    Button("Retry model preparation") {
+                        Task { await appState.initialize(modelID: selectedModel) }
+                    }
+                    .voiceScribeGlassButton()
+                }
             }
 
             Text("VoiceScribe • Native MLX Qwen3-ASR")
@@ -68,8 +78,11 @@ struct SettingsView: View {
                 .foregroundColor(.secondary.opacity(0.8))
                 .frame(maxWidth: .infinity, alignment: .center)
         }
-        .padding(20)
-        .frame(width: 470, height: 500)
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .padding(12)
+        .frame(width: 520, height: 600)
+        .voiceScribeGlass(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .onAppear {
             appState.refreshInputDevices()
             if !ASRModelCatalog.isSupportedASRModel(selectedModel) {
@@ -114,25 +127,37 @@ private struct SpeechModelSection: View {
                 Text("Recommended")
                     .font(.subheadline.weight(.semibold))
 
-                HStack(spacing: 8) {
+                VoiceScribeGlassGroup(spacing: 8) {
+                  HStack(spacing: 8) {
                     ForEach(ASRModelCatalog.quickChoices) { model in
                         Button(action: { selectedModel = model.id }) {
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(model.title.replacingOccurrences(of: "Qwen3-ASR ", with: ""))
-                                    .font(.system(size: 12, weight: .semibold))
+                                HStack(spacing: 4) {
+                                    Text(model.title.replacingOccurrences(of: "Qwen3-ASR ", with: ""))
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .opacity(selectedModel == model.id ? 1 : 0)
+                                        .accessibilityHidden(true)
+                                }
+                                .font(.system(size: 12, weight: .semibold))
                                 Text(model.quantization.uppercased())
                                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                                     .foregroundColor(.secondary)
+                                Text(model.sizeLabel)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(selectedModel == model.id ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.08))
+                            .voiceScribeGlass(
+                                in: RoundedRectangle(cornerRadius: 12),
+                                tint: selectedModel == model.id ? .accentColor.opacity(0.15) : nil,
+                                interactive: true
                             )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityAddTraits(selectedModel == model.id ? .isSelected : [])
                     }
+                  }
                 }
 
                 Toggle("Show advanced Qwen3-ASR variants", isOn: $showAdvancedModels)
@@ -140,7 +165,7 @@ private struct SpeechModelSection: View {
                 if showAdvancedModels {
                     Picker("Advanced model", selection: $selectedModel) {
                         ForEach(ASRModelCatalog.supportedModels) { model in
-                            Text("\(model.title) • \(model.quantization)")
+                            Text("\(model.title) • \(model.quantization) • \(model.sizeLabel)")
                                 .tag(model.id)
                         }
                     }
@@ -151,9 +176,10 @@ private struct SpeechModelSection: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                Text("ForcedAligner models are excluded here because they are not direct speech-to-text generation models.")
+                Text("Sizes show model weights; runtime memory also includes audio and decoding buffers.")
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
+
             }
             .padding(.vertical, 4)
         }
@@ -207,6 +233,7 @@ private struct MicrophoneSection: View {
             Button("Refresh microphone list") {
                 appState.refreshInputDevices()
             }
+            .voiceScribeGlassButton()
 
             if let selectedUID = appState.selectedInputDeviceUID,
                let selectedMic = appState.availableInputDevices.first(where: { $0.id == selectedUID }) {

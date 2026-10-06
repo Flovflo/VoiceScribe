@@ -1,0 +1,22 @@
+Generated tokenizer.json at: /tmp/voicescribe-benchmark-models/qwen/tokenizer.json
+qwen fr-clean run 1: 0.709s, WER 0.000, ok
+qwen fr-clean run 2: 0.648s, WER 0.000, ok
+qwen fr-clean run 3: 0.612s, WER 0.000, ok
+qwen fr-noise10dB run 1: 0.665s, WER 0.000, ok
+qwen fr-noise10dB run 2: 0.764s, WER 0.000, ok
+qwen fr-noise10dB run 3: 0.653s, WER 0.000, ok
+qwen fr-long3x run 1: 1.718s, WER 0.000, ok
+qwen fr-long3x run 2: 1.713s, WER 0.000, ok
+qwen fr-long3x run 3: 1.667s, WER 0.000, ok
+qwen en-clean run 1: 0.574s, WER 0.000, ok
+qwen en-clean run 2: 0.568s, WER 0.000, ok
+qwen en-clean run 3: 0.571s, WER 0.000, ok
+qwen en-noise10dB run 1: 0.568s, WER 0.000, ok
+qwen en-noise10dB run 2: 0.559s, WER 0.000, ok
+qwen en-noise10dB run 3: 0.572s, WER 0.000, ok
+qwen en-long3x run 1: 1.432s, WER 0.000, ok
+qwen en-long3x run 2: 1.495s, WER 0.000, ok
+qwen en-long3x run 3: 1.478s, WER 0.000, ok
+qwen silence10s run 1: 0.273s, WER n/a, ok
+qwen silence10s run 2: 0.271s, WER n/a, ok
+qwen silence10s run 3: 0.268s, WER n/a, ok

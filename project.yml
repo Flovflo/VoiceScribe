@@ -5,15 +5,15 @@ options:
 settings:
   base:
     SWIFT_VERSION: 6.0
-    MARKETING_VERSION: 1.4.5
+    MARKETING_VERSION: 1.5.0
     CURRENT_PROJECT_VERSION: 1
 packages:
   mlx-swift:
     url: https://github.com/ml-explore/mlx-swift
-    branch: main
+    exactVersion: 0.32.3
   swift-transformers:
     url: https://github.com/huggingface/swift-transformers
-    from: 1.1.6
+    exactVersion: 1.3.4
 targets:
   VoiceScribeCore:
     type: framework
@@ -40,6 +40,7 @@ targets:
         DEBUG_INFORMATION_FORMAT: dwarf
         GENERATE_INFOPLIST_FILE: YES
         SKIP_INSTALL: YES
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) VOICESCRIBE_APP_STORE
   VoiceScribeAppStore:
     type: application
     platform: macOS

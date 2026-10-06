@@ -53,13 +53,7 @@ final class NativeEngineTests: XCTestCase {
     func testModelLoadingAndBasicInference() async throws {
         try await requireASRPrerequisites()
 
-        let engine = NativeASREngine(
-            config: .init(
-                modelName: "mlx-community/Qwen3-ASR-1.7B-8bit",
-                maxTokens: 256,
-                forcedLanguage: nil
-            )
-        )
+        let engine = makeIntegrationEngine(maxTokens: 256)
 
         try await loadModelWithInfraSkip(engine)
 
@@ -86,13 +80,13 @@ final class NativeEngineTests: XCTestCase {
             throw XCTSkip("Set VOICESCRIBE_TEST_AUDIO to a WAV file to run sample transcription.")
         }
 
-        let engine = NativeASREngine(
-            config: .init(modelName: "mlx-community/Qwen3-ASR-1.7B-8bit", maxTokens: 64)
-        )
+        let engine = makeIntegrationEngine(maxTokens: 256)
         try await loadModelWithInfraSkip(engine)
 
         let url = URL(fileURLWithPath: audioPath)
+        let started = ContinuousClock.now
         let text = try await engine.transcribe(from: url)
+        print("Native VoiceScribe transcription (\(integrationModelID), \(ContinuousClock.now - started)): \(text)")
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         XCTAssertFalse(cleaned.isEmpty)
         XCTAssertFalse(text.contains("<asr_text>"), "ASR output should not include metadata tags")
@@ -124,23 +118,22 @@ final class NativeEngineTests: XCTestCase {
             throw XCTSkip("ASR benchmark requires GPU; unset VOICESCRIBE_MLX_DEVICE=cpu.")
         }
         try requireMLXMetallibForTests()
-        try await requireHuggingFaceReachability()
+        try await requireIntegrationModelSource()
 
-        let engine = NativeASREngine(
-            config: .init(modelName: "mlx-community/Qwen3-ASR-1.7B-8bit", maxTokens: 16)
-        )
+        let engine = makeIntegrationEngine(maxTokens: 256)
         try await loadModelWithInfraSkip(engine)
 
-        let sampleRate = 16000
-        let duration = 10.0
-        let samples = (0..<Int(Double(sampleRate) * duration)).map { i -> Float in
-            let t = Double(i) / Double(sampleRate)
-            return Float(sin(2 * .pi * 220.0 * t))
+        guard let audioPath = ProcessInfo.processInfo.environment["VOICESCRIBE_TEST_AUDIO"] else {
+            throw XCTSkip("ASR benchmark needs a speech WAV via VOICESCRIBE_TEST_AUDIO.")
         }
+        let audioURL = URL(fileURLWithPath: audioPath)
+        // Warm the actual speech shape before measuring GPU work.
+        _ = try await engine.transcribe(from: audioURL)
 
         let clock = ContinuousClock()
         let start = clock.now
-        _ = try? await engine.transcribe(samples: samples, sampleRate: sampleRate)
+        let text = try await engine.transcribe(from: audioURL)
+        XCTAssertFalse(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         let elapsed = clock.now - start
 
         let elapsedMs = Double(elapsed.components.seconds) * 1000.0
@@ -150,8 +143,9 @@ final class NativeEngineTests: XCTestCase {
                let value = Double(raw), value > 0 {
                 return value
             }
-            return 1000.0
+            return 500.0
         }()
+        print("Native VoiceScribe speech latency: \(elapsedMs) ms; target: \(targetMs) ms")
         XCTAssertLessThan(elapsedMs, targetMs)
     }
 
@@ -170,13 +164,7 @@ final class NativeEngineTests: XCTestCase {
             Int(ProcessInfo.processInfo.environment["VOICESCRIBE_ASR_STRESS_ITERS"] ?? "5") ?? 5
         )
 
-        let engine = NativeASREngine(
-            config: .init(
-                modelName: "mlx-community/Qwen3-ASR-1.7B-8bit",
-                maxTokens: 256,
-                forcedLanguage: nil
-            )
-        )
+        let engine = makeIntegrationEngine(maxTokens: 256)
         try await loadModelWithInfraSkip(engine)
 
         let url = URL(fileURLWithPath: audioPath)
@@ -199,16 +187,40 @@ private func normalizeForKeywordMatch(_ value: String) -> String {
 
 private struct TestTimeoutError: Error {}
 
+private var integrationModelID: String {
+    ProcessInfo.processInfo.environment["VOICESCRIBE_TEST_MODEL"] ?? ASRModelCatalog.defaultModelID
+}
+
+private func makeIntegrationEngine(maxTokens: Int) -> NativeASREngine {
+    let config = NativeASREngine.Config(modelName: integrationModelID, maxTokens: maxTokens)
+    if let path = ProcessInfo.processInfo.environment["VOICESCRIBE_TEST_MODEL_DIRECTORY"] {
+        let directory = URL(fileURLWithPath: path, isDirectory: true)
+        return NativeASREngine(config: config, modelDirectoryLoader: { _, progress in
+            progress(1)
+            return directory
+        })
+    }
+    return NativeASREngine(config: config)
+}
+
 private func requireASRPrerequisites() async throws {
     guard ProcessInfo.processInfo.environment["VOICESCRIBE_RUN_ASR_TESTS"] == "1" else {
         throw XCTSkip("Set VOICESCRIBE_RUN_ASR_TESTS=1 to run ASR integration tests.")
     }
     try requireMLXMetallibForTests()
+    try await requireIntegrationModelSource()
+}
+
+private func requireIntegrationModelSource() async throws {
+    if let path = ProcessInfo.processInfo.environment["VOICESCRIBE_TEST_MODEL_DIRECTORY"] {
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path), "Missing local model: \(path)")
+        return
+    }
     try await requireHuggingFaceReachability()
 }
 
 private func requireHuggingFaceReachability() async throws {
-    let url = URL(string: "https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-8bit/resolve/main/config.json")!
+    let url = URL(string: "https://huggingface.co/\(integrationModelID)/resolve/main/config.json")!
     var request = URLRequest(url: url)
     request.httpMethod = "HEAD"
     request.timeoutInterval = 15

@@ -19,8 +19,12 @@ public final class NativeASRService: ObservableObject {
 
     // MARK: - Initialization
 
-    public init(config: NativeASREngine.Config = .qwen3ASR_1_7B_8bit) {
-        self.engine = NativeASREngine(config: config)
+    public convenience init(config: NativeASREngine.Config = .qwen3ASR_1_7B_4bit) {
+        self.init(engine: NativeASREngine(config: config))
+    }
+
+    init(engine: NativeASREngine) {
+        self.engine = engine
         startListening()
     }
 
@@ -34,7 +38,7 @@ public final class NativeASRService: ObservableObject {
         do {
             try await engine.loadModel()
         } catch {
-            lastError = error.localizedDescription
+            if !(error is CancellationError) { lastError = error.localizedDescription }
             throw error
         }
     }
@@ -52,7 +56,7 @@ public final class NativeASRService: ObservableObject {
             do {
                 try await engine.setModel(name)
             } catch {
-                lastError = error.localizedDescription
+                if !(error is CancellationError) { lastError = error.localizedDescription }
             }
         }
     }
@@ -61,7 +65,7 @@ public final class NativeASRService: ObservableObject {
         do {
             try await engine.setModel(name)
         } catch {
-            lastError = error.localizedDescription
+            if !(error is CancellationError) { lastError = error.localizedDescription }
             throw error
         }
     }
@@ -81,7 +85,7 @@ public final class NativeASRService: ObservableObject {
             do {
                 try await engine.loadModel()
             } catch {
-                lastError = error.localizedDescription
+                if !(error is CancellationError) { lastError = error.localizedDescription }
             }
         }
     }
@@ -99,10 +103,11 @@ public final class NativeASRService: ObservableObject {
     // MARK: - Private Helpers
 
     private func startListening() {
+        let events = engine.events
         eventsTask = Task { [weak self] in
-            guard let self else { return }
-            for await event in self.engine.events {
-                self.handle(event)
+            for await event in events {
+                guard !Task.isCancelled else { break }
+                self?.handle(event)
             }
         }
     }

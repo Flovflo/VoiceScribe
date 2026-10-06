@@ -29,12 +29,19 @@ public actor NativeASREngine {
         public let chunkDurationSeconds: Float
         public let minChunkDurationSeconds: Float
 
-        public static let qwen3ASR_1_7B_8bit = Config(
+        public static let qwen3ASR_1_7B_4bit = Config(
             modelName: requiredModelID,
             maxTokens: 256,
             temperature: 0.0,
             forcedLanguage: nil,
             context: "",
+            chunkDurationSeconds: 30,
+            minChunkDurationSeconds: 1
+        )
+
+        public static let qwen3ASR_1_7B_8bit = Config(
+            modelName: "mlx-community/Qwen3-ASR-1.7B-8bit",
+            maxTokens: 256,
             chunkDurationSeconds: 30,
             minChunkDurationSeconds: 1
         )
@@ -78,6 +85,8 @@ public actor NativeASREngine {
     private var isReady = false
     private var isModelCached = false
     private var loadTask: Task<Void, Error>?
+    private var loadGeneration: UInt64 = 0
+    private let modelDirectoryLoader: @Sendable (String, @escaping @Sendable (Double) -> Void) async throws -> URL
     private var idleUnloadTask: Task<Void, Never>?
     private var idleUnloadGeneration: UInt64 = 0
 
@@ -88,7 +97,15 @@ public actor NativeASREngine {
 
     // MARK: - Initialization
 
-    public init(config: Config = .qwen3ASR_1_7B_8bit) {
+    public init(config: Config = .qwen3ASR_1_7B_4bit) {
+        self.init(config: config, modelDirectoryLoader: Self.downloadModelDirectory)
+    }
+
+    init(
+        config: Config,
+        modelDirectoryLoader: @escaping @Sendable (String, @escaping @Sendable (Double) -> Void) async throws -> URL
+    ) {
+        self.modelDirectoryLoader = modelDirectoryLoader
         self.config = config
         self.modelName = config.modelName
         self.preferredLanguage = Self.normalizePreferredLanguage(config.forcedLanguage)
@@ -113,15 +130,17 @@ public actor NativeASREngine {
     // MARK: - Public API
 
     public func setModel(_ name: String) async throws {
-        guard name != modelName else { return }
         guard Self.isAllowedModel(name) else {
             let error = ASRError.unsupportedModel(name)
             emit(.error(error.localizedDescription))
             emit(.status("Error: \(error.localizedDescription)"))
             throw error
         }
-        modelName = name
-        shutdown()
+        if name != modelName {
+            modelName = name
+            shutdown()
+        }
+        // A previously failed or idle-unloaded selection still needs preparation.
         try await loadModel()
     }
 
@@ -130,6 +149,7 @@ public actor NativeASREngine {
     }
 
     public func loadModel() async throws {
+        try Task.checkCancellation()
         if isReady, model != nil, tokenizer != nil {
             scheduleIdleUnloadIfNeeded()
             return
@@ -138,13 +158,19 @@ public actor NativeASREngine {
             return try await loadTask.value
         }
 
-        let task = Task { try await self.performLoadModel() }
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        let task = Task { try await self.performLoadModel(generation: generation) }
         loadTask = task
-        defer { loadTask = nil }
+        defer {
+            if loadGeneration == generation { loadTask = nil }
+        }
         try await task.value
+        try Task.checkCancellation()
     }
 
-    private func performLoadModel() async throws {
+    private func performLoadModel(generation: UInt64) async throws {
+        try checkLoadIsCurrent(generation)
         guard Self.isAllowedModel(modelName) else {
             throw ASRError.unsupportedModel(modelName)
         }
@@ -152,8 +178,10 @@ public actor NativeASREngine {
         configureMemoryPolicy()
         isLoading = true
         defer {
-            isLoading = false
-            scheduleIdleUnloadIfNeeded()
+            if loadGeneration == generation {
+                isLoading = false
+                scheduleIdleUnloadIfNeeded()
+            }
         }
 
         let repoId = modelName
@@ -167,29 +195,11 @@ public actor NativeASREngine {
         emit(.cached(hasLocalModelFiles))
 
         do {
-            let hub = HubApi(downloadBase: try Self.cacheRoot())
-
-            let continuation = eventsContinuation
-            let progressHandler: @Sendable (Progress, Double?) -> Void = { progress, _ in
-                continuation.yield(.progress(progress.fractionCompleted))
-            }
-
             emit(.status(hasLocalModelFiles ? "Using cached model files..." : "Downloading model files..."))
-            let modelDir = try await hub.snapshot(
-                from: repoId,
-                matching: [
-                    "config.json",
-                    "generation_config.json",
-                    "preprocessor_config.json",
-                    "chat_template.json",
-                    "*.safetensors",
-                    "tokenizer.json",
-                    "tokenizer_config.json",
-                    "vocab.json",
-                    "merges.txt"
-                ],
-                progressHandler: progressHandler
-            )
+            let modelDir = try await modelDirectoryLoader(repoId) { [weak self] progress in
+                Task { await self?.publishLoadProgress(progress, generation: generation) }
+            }
+            try checkLoadIsCurrent(generation)
 
             isModelCached = true
             emit(.cached(true))
@@ -205,7 +215,6 @@ public actor NativeASREngine {
             guard architectures.contains("Qwen3ASRForConditionalGeneration") else {
                 throw ASRError.modelLoadFailed("Unexpected architectures: \(architectures.sorted().joined(separator: ", "))")
             }
-            audioTokenID = currentConfig.thinker_config.audio_token_id
 
             emit(.status("Loading model weights..."))
             let weightFiles = try FileManager.default.contentsOfDirectory(at: modelDir, includingPropertiesForKeys: nil)
@@ -225,7 +234,7 @@ public actor NativeASREngine {
             emit(.status("Loading tokenizer..."))
             try Self.ensureTokenizerJSONIfNeeded(in: modelDir)
             let tokenizer = try await AutoTokenizer.from(modelFolder: modelDir)
-            self.tokenizer = tokenizer
+            try checkLoadIsCurrent(generation)
 
             emit(.status("Building model architecture..."))
             let audioConf = Qwen3AudioConfiguration(
@@ -257,8 +266,6 @@ public actor NativeASREngine {
                     }
                 )
             }
-
-            self.model = model
 
             emit(.status("Applying weights..."))
             var sanitizedWeights: [String: MLXArray] = [:]
@@ -336,11 +343,19 @@ public actor NativeASREngine {
                 }
             }
 
+            try checkLoadIsCurrent(generation)
+            self.model = model
+            self.tokenizer = tokenizer
+            audioTokenID = currentConfig.thinker_config.audio_token_id
             isReady = true
             emit(.ready(true))
             emit(.progress(1.0))
             emit(.status("Ready"))
         } catch {
+            // An invalidated load must never overwrite the newer model or its UI events.
+            guard generation == loadGeneration, !Task.isCancelled else {
+                throw CancellationError()
+            }
             Self.logger.error("Model load error: \(error.localizedDescription)")
             isReady = false
             model = nil
@@ -354,6 +369,7 @@ public actor NativeASREngine {
     }
 
     public func transcribe(samples: [Float], sampleRate: Int) async throws -> String {
+        try Task.checkCancellation()
         cancelIdleUnload()
         defer { finishInferenceMemoryCycle() }
         try await ensureModelResident()
@@ -377,6 +393,7 @@ public actor NativeASREngine {
         var processedChunks = 0
 
         for (index, chunk) in chunks.enumerated() {
+            try Task.checkCancellation()
             var inputBatch = featureExtractor.extractFeaturesMLX(samples: chunk.samples, sampleRate: sampleRate)
             if ProcessInfo.processInfo.environment["VOICESCRIBE_MATERIALIZE_FEATURES"] == "1" {
                 MLX.eval(inputBatch)
@@ -393,8 +410,8 @@ public actor NativeASREngine {
                 emit(.status("Transcribing (\(statusLabel))..."))
             }
 
-            func runOnce(language: String?) -> (raw: String, cleaned: String) {
-                let raw = unsafeModel.generate(
+            func runOnce(language: String?) throws -> (raw: String, cleaned: String) {
+                let raw = try unsafeModel.generate(
                     audioFeatures: inputBatch,
                     tokenizer: unsafeTokenizer,
                     audioTokenID: audioTokenID,
@@ -414,14 +431,14 @@ public actor NativeASREngine {
 
             let languageAttempts = Self.languageAttemptOrder(preferredLanguage: selectedLanguage)
             var remainingAttempts = Set(languageAttempts.dropFirst().map(Self.languageAttemptKey(for:)))
-            var attempt = runOnce(language: languageAttempts[0])
+            var attempt = try runOnce(language: languageAttempts[0])
             if attempt.cleaned.isEmpty && Self.shouldRetryLanguageFallbacks(raw: attempt.raw) {
                 for fallback in languageAttempts.dropFirst() {
                     let key = Self.languageAttemptKey(for: fallback)
                     if remainingAttempts.remove(key) == nil {
                         continue
                     }
-                    let retry = runOnce(language: fallback)
+                    let retry = try runOnce(language: fallback)
                     if !retry.cleaned.isEmpty {
                         attempt = retry
                         break
@@ -467,8 +484,10 @@ public actor NativeASREngine {
 
     public func shutdown() {
         cancelIdleUnload()
+        loadGeneration &+= 1
         loadTask?.cancel()
         loadTask = nil
+        isLoading = false
         model = nil
         tokenizer = nil
         isReady = false
@@ -484,6 +503,16 @@ public actor NativeASREngine {
 
     private func emit(_ event: Event) {
         eventsContinuation.yield(event)
+    }
+
+    private func checkLoadIsCurrent(_ generation: UInt64) throws {
+        try Task.checkCancellation()
+        guard generation == loadGeneration else { throw CancellationError() }
+    }
+
+    private func publishLoadProgress(_ progress: Double, generation: UInt64) {
+        guard generation == loadGeneration, isLoading else { return }
+        emit(.progress(progress))
     }
 
     private func configureMemoryPolicy() {
@@ -568,37 +597,69 @@ public actor NativeASREngine {
         return root
     }
 
+    private static func downloadModelDirectory(
+        _ repoID: String, progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> URL {
+        let root = try cacheRoot()
+        if let cached = cachedModelDirectory(repoID, root: root) { return cached }
+        let hub = HubApi(downloadBase: root)
+        return try await hub.snapshot(
+            from: repoID,
+            matching: ["config.json", "generation_config.json", "preprocessor_config.json",
+                       "chat_template.json", "*.safetensors", "*.safetensors.index.json", "tokenizer.json", "tokenizer_config.json",
+                       "vocab.json", "merges.txt"],
+            progressHandler: { value, _ in progress(value.fractionCompleted) }
+        )
+    }
+
     static func hasCachedModelFiles(_ repoId: String) -> Bool {
         guard let cacheRoot = try? cacheRoot() else {
             return false
         }
 
-        let modelDir = cacheRoot.appending(path: "models/\(repoId)", directoryHint: .isDirectory)
+        return cachedModelDirectory(repoId, root: cacheRoot) != nil
+    }
+
+    static func cachedModelDirectory(_ repoId: String, root: URL) -> URL? {
+        let modelDir = root.appending(path: "models/\(repoId)", directoryHint: .isDirectory)
         let fileManager = FileManager.default
 
-        let requiredFiles = [
-            "config.json",
-            "generation_config.json",
-            "preprocessor_config.json",
-            "chat_template.json"
-        ]
+        func hasContent(_ name: String) -> Bool {
+            guard let values = try? modelDir.appending(path: name).resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]) else { return false }
+            return values.isRegularFile == true && (values.fileSize ?? 0) > 0
+        }
+        let requiredFiles = ["config.json", "tokenizer_config.json"]
 
-        guard requiredFiles.allSatisfy({ fileManager.fileExists(atPath: modelDir.appending(path: $0).path) }) else {
-            return false
+        guard requiredFiles.allSatisfy(hasContent) else {
+            return nil
         }
 
-        let hasTokenizer = fileManager.fileExists(atPath: modelDir.appending(path: "tokenizer.json").path)
-            || (
-                fileManager.fileExists(atPath: modelDir.appending(path: "vocab.json").path)
-                    && fileManager.fileExists(atPath: modelDir.appending(path: "merges.txt").path)
-                    && fileManager.fileExists(atPath: modelDir.appending(path: "tokenizer_config.json").path)
-            )
+        let hasTokenizer = hasContent("tokenizer.json") || (hasContent("vocab.json") && hasContent("merges.txt"))
         guard hasTokenizer else {
-            return false
+            return nil
         }
 
         let weightFiles = (try? fileManager.contentsOfDirectory(at: modelDir, includingPropertiesForKeys: nil)) ?? []
-        return weightFiles.contains(where: { $0.pathExtension == "safetensors" })
+        let weights = weightFiles.filter { $0.pathExtension == "safetensors" }
+        guard !weights.isEmpty, weights.allSatisfy({ hasContent($0.lastPathComponent) }) else { return nil }
+        // A cancelled Hub snapshot can leave only the first shard. Do not bypass
+        // the downloader until every numbered shard has arrived.
+        let shardPattern = #"^(.*)-[0-9]{5}-of-([0-9]{5})\.safetensors$"#
+        guard let regex = try? NSRegularExpression(pattern: shardPattern) else { return nil }
+        for weight in weights {
+            let name = weight.lastPathComponent
+            guard let match = regex.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)),
+                  let prefixRange = Range(match.range(at: 1), in: name),
+                  let countRange = Range(match.range(at: 2), in: name),
+                  let count = Int(name[countRange]) else { continue }
+            guard count > 0 else { return nil }
+            let prefix = String(name[prefixRange])
+            for index in 1...count {
+                let shard = String(format: "%@-%05d-of-%05d.safetensors", prefix, index, count)
+                guard hasContent(shard) else { return nil }
+            }
+        }
+        return modelDir
     }
 
     private static func isAllowedModel(_ name: String) -> Bool {

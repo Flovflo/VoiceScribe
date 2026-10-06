@@ -2,6 +2,7 @@ import SwiftUI
 import VoiceScribeCore
 
 struct VoiceScribeTemplateOnboarding: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let items: [VoiceScribeOnboardingItem]
     @Binding var activeIndex: Int
     @Binding var selectedModel: String
@@ -24,12 +25,12 @@ struct VoiceScribeTemplateOnboarding: View {
                             .contentTransition(.interpolate)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .compositingGroup()
-                            .animation(.easeInOut(duration: 0.5), value: activeIndex)
+                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.5), value: activeIndex)
                             .keyframeAnimator(initialValue: CGFloat.zero, trigger: activeIndex) { content, blur in
                                 content.blur(radius: blur)
                             } keyframes: { _ in
-                                CubicKeyframe(16, duration: 0.25)
-                                CubicKeyframe(0, duration: 0.25)
+                                CubicKeyframe(reduceMotion ? 0 : 16, duration: reduceMotion ? 0 : 0.25)
+                                CubicKeyframe(0, duration: reduceMotion ? 0 : 0.25)
                             }
                             .clipShape(bezelShape)
 
@@ -59,6 +60,7 @@ struct VoiceScribeTemplateOnboarding: View {
         }
         .padding(.vertical, 30)
         .overlay(alignment: .top) {
+          VoiceScribeGlassGroup {
             HStack {
                 Button(action: handleBackOrExit) {
                     Image(systemName: activeIndex == 0 ? "xmark" : "chevron.left")
@@ -66,7 +68,7 @@ struct VoiceScribeTemplateOnboarding: View {
                         .contentTransition(.symbolEffect)
                         .foregroundStyle(.secondary)
                         .frame(width: 25, height: 25)
-                        .background(.ultraThinMaterial, in: .circle)
+                        .voiceScribeGlass(in: Circle(), interactive: true)
                 }
 
                 Spacer(minLength: 0)
@@ -76,30 +78,23 @@ struct VoiceScribeTemplateOnboarding: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(width: 25, height: 25)
-                        .background(.ultraThinMaterial, in: .circle)
+                        .voiceScribeGlass(in: Circle(), interactive: true)
                 }
             }
             .buttonStyle(.plain)
             .padding(12)
+          }
         }
         .frame(width: 600)
         .clipShape(.rect(cornerRadius: 30).inset(by: 0.6))
-        .background {
-            ZStack {
-                RoundedRectangle(cornerRadius: 30)
-                    .fill(.windowBackground)
-
-                RoundedRectangle(cornerRadius: 30)
-                    .stroke(.gray.opacity(0.2), lineWidth: 1.2)
-            }
-        }
+        .voiceScribeGlass(in: RoundedRectangle(cornerRadius: 30))
     }
 
     private func handleBackOrExit() {
         if activeIndex == 0 {
             onExit()
         } else {
-            withAnimation(.smooth(duration: 0.5, extraBounce: 0)) {
+            withAnimation(reduceMotion ? nil : .smooth(duration: 0.5, extraBounce: 0)) {
                 activeIndex = max(activeIndex - 1, 0)
             }
         }
@@ -201,8 +196,8 @@ struct VoiceScribeTemplateOnboarding: View {
         .keyframeAnimator(initialValue: CGFloat.zero, trigger: activeIndex) { content, blur in
             content.blur(radius: blur)
         } keyframes: { _ in
-            CubicKeyframe(15, duration: 0.25)
-            CubicKeyframe(0, duration: 0.25)
+            CubicKeyframe(reduceMotion ? 0 : 15, duration: reduceMotion ? 0 : 0.25)
+            CubicKeyframe(0, duration: reduceMotion ? 0 : 0.25)
         }
     }
 
@@ -214,11 +209,11 @@ struct VoiceScribeTemplateOnboarding: View {
                 .contentTransition(.numericText())
                 .foregroundStyle(buttonForeground)
                 .frame(width: 300, height: 42)
-                .background(buttonTint.gradient, in: .capsule)
                 .contentShape(.capsule)
                 .opacity(canContinue ? 1 : 0.55)
         }
-        .buttonStyle(.plain)
+        .tint(buttonTint)
+        .voiceScribeGlassButton(prominent: true)
         .disabled(!canContinue)
     }
 
@@ -250,7 +245,7 @@ struct VoiceScribeTemplateOnboarding: View {
         if activeIndex == items.count - 1 {
             onComplete()
         } else {
-            withAnimation(.smooth(duration: 0.5, extraBounce: 0)) {
+            withAnimation(reduceMotion ? nil : .smooth(duration: 0.5, extraBounce: 0)) {
                 activeIndex = min(activeIndex + 1, items.count - 1)
             }
         }
@@ -331,29 +326,36 @@ private struct StepAccessoryView: View {
             EmptyView()
         case .model:
             VStack(spacing: 12) {
-                HStack(spacing: 8) {
+                VoiceScribeGlassGroup(spacing: 8) {
+                  HStack(spacing: 8) {
                     ForEach(models, id: \.id) { model in
                         Button {
                             selectedModel = model.id
                         } label: {
                             VStack(spacing: 2) {
-                                Text(model.title.replacingOccurrences(of: "Qwen3-ASR ", with: ""))
-                                    .font(.system(size: 11, weight: .semibold))
+                                HStack(spacing: 4) {
+                                    Text(model.title.replacingOccurrences(of: "Qwen3-ASR ", with: ""))
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .opacity(selectedModel == model.id ? 1 : 0)
+                                        .accessibilityHidden(true)
+                                }
+                                .font(.system(size: 11, weight: .semibold))
                                 Text(model.quantization.uppercased())
                                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                                     .foregroundStyle(.secondary)
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
-                            .background(
-                                selectedModel == model.id
-                                    ? Color.accentColor.opacity(0.18)
-                                    : Color.secondary.opacity(0.08),
-                                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .voiceScribeGlass(
+                                in: RoundedRectangle(cornerRadius: 16, style: .continuous),
+                                tint: selectedModel == model.id ? .accentColor.opacity(0.15) : nil,
+                                interactive: true
                             )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityAddTraits(selectedModel == model.id ? .isSelected : [])
                     }
+                  }
                 }
 
                 OnboardingLanguageSelection(selectedLanguageID: $selectedLanguageID)
@@ -434,7 +436,7 @@ private struct KeyCap: View {
             .font(.system(size: 11, weight: .semibold, design: .rounded))
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .voiceScribeGlass(in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 

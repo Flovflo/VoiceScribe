@@ -1,9 +1,37 @@
 import Foundation
 @preconcurrency import AVFoundation
 import CoreAudio
+import AudioToolbox
+import Accelerate
 import os.log
 
 private let logger = Logger(subsystem: "com.voicescribe", category: "AudioRecorder")
+
+private final class MicrophonePermissionRequest: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Bool, Never>?
+    private var result: Bool?
+
+    func install(_ continuation: CheckedContinuation<Bool, Never>) {
+        let result = lock.withLock { () -> Bool? in
+            if let result = self.result { return result }
+            self.continuation = continuation
+            return nil as Bool?
+        }
+        if let result { continuation.resume(returning: result) }
+    }
+
+    func resolve(_ result: Bool) {
+        let continuation = lock.withLock { () -> CheckedContinuation<Bool, Never>? in
+            guard self.result == nil else { return nil as CheckedContinuation<Bool, Never>? }
+            self.result = result
+            let continuation = self.continuation
+            self.continuation = nil
+            return continuation
+        }
+        continuation?.resume(returning: result)
+    }
+}
 
 private final class ConverterInputState: @unchecked Sendable {
     private let lock = NSLock()
@@ -21,6 +49,20 @@ private final class ConverterInputState: @unchecked Sendable {
         guard !hasSuppliedInput else { return nil }
         hasSuppliedInput = true
         return buffer
+    }
+}
+
+private final class SelectedMicrophoneDelegate: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate, @unchecked Sendable {
+    private weak var engine: AudioCaptureEngine?
+    private let generation: UInt64
+
+    init(engine: AudioCaptureEngine, generation: UInt64) {
+        self.engine = engine
+        self.generation = generation
+    }
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        engine?.handleSampleBuffer(sampleBuffer, generation: generation)
     }
 }
 
@@ -101,38 +143,62 @@ struct AudioInputRoutePlanner {
 /// Non-isolated audio capture engine
 /// This class is NOT MainActor and handles all audio thread callbacks safely
 final class AudioCaptureEngine: @unchecked Sendable {
+    // AVAudioEngine lifecycle runs on one worker queue. The tap only touches
+    // sample storage under `lock`, never the engine or the main actor.
+    private let controlQueue = DispatchQueue(label: "com.voicescribe.audio-capture")
+    private let callbackQueue = DispatchQueue(label: "com.voicescribe.audio-capture-buffers", qos: .userInitiated)
     private var engine: AVAudioEngine?
+    private var captureSession: AVCaptureSession?
+    private var captureDelegate: SelectedMicrophoneDelegate?
     private var samples: [Float] = []
     private let lock = NSLock()
-    private(set) var sampleRate: Double = 48000
-    private(set) var lastRMS: Float = 0
-    private(set) var isCapturing = false
-    private var previousDefaultInputDeviceID: AudioDeviceID?
+    private var captureSampleRate: Double = 48000
+    var sampleRate: Double { lock.withLock { captureSampleRate } }
+    private var rms: Float = 0
+    var lastRMS: Float {
+        lock.withLock { rms }
+    }
     private var hasReceivedBuffer = false
+    private var captureGeneration: UInt64 = 0
     
-    func start(preferredDeviceID: AudioDeviceID?) throws {
-        lock.lock()
-        samples.removeAll()
-        hasReceivedBuffer = false
-        lock.unlock()
-
-        if let preferredDeviceID {
-            let currentDefault = Self.defaultInputDeviceID()
-            if currentDefault != preferredDeviceID {
-                guard Self.setDefaultInputDevice(preferredDeviceID) else {
-                    throw AudioRecorderError.engineSetupFailed("Failed to switch to selected microphone")
+    func start(preferredDeviceID: AudioDeviceID?) async throws {
+        try Task.checkCancellation()
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                controlQueue.async {
+                    do {
+                        try self.startOnControlQueue(preferredDeviceID: preferredDeviceID)
+                        continuation.resume()
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
                 }
-                guard Self.waitForDefaultInputDevice(preferredDeviceID, timeout: 1.0) else {
-                    throw AudioRecorderError.engineSetupFailed("Selected microphone did not become active")
-                }
-                previousDefaultInputDeviceID = currentDefault
             }
-        } else {
-            previousDefaultInputDeviceID = nil
+            try Task.checkCancellation()
+        } catch {
+            _ = stop()
+            throw error
         }
+    }
 
+    private func startOnControlQueue(preferredDeviceID: AudioDeviceID?) throws {
+        guard engine == nil, captureSession == nil else {
+            throw AudioRecorderError.engineSetupFailed("Audio capture is already active")
+        }
+        let generation = lock.withLock {
+            samples.removeAll(keepingCapacity: true)
+            hasReceivedBuffer = false
+            rms = 0
+            captureGeneration &+= 1
+            return captureGeneration
+        }
+        if let preferredDeviceID {
+            try startSelectedMicrophone(preferredDeviceID, generation: generation)
+            return
+        }
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
+        var tapInstalled = false
         do {
             let format = inputNode.outputFormat(forBus: 0)
 
@@ -140,24 +206,18 @@ final class AudioCaptureEngine: @unchecked Sendable {
                 throw AudioRecorderError.engineSetupFailed("No audio input")
             }
 
-            sampleRate = format.sampleRate
-            self.engine = engine
+            lock.withLock { captureSampleRate = format.sampleRate }
 
             inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-                self?.handleBuffer(buffer)
+                self?.handleBuffer(buffer, generation: generation)
             }
+            tapInstalled = true
 
             try engine.start()
-            isCapturing = true
+            self.engine = engine
         } catch {
-            inputNode.removeTap(onBus: 0)
+            if tapInstalled { inputNode.removeTap(onBus: 0) }
             engine.stop()
-            self.engine = nil
-            isCapturing = false
-            if let previousDefaultInputDeviceID {
-                _ = Self.setDefaultInputDevice(previousDefaultInputDeviceID)
-                self.previousDefaultInputDeviceID = nil
-            }
             if let recorderError = error as? AudioRecorderError {
                 throw recorderError
             }
@@ -165,56 +225,149 @@ final class AudioCaptureEngine: @unchecked Sendable {
         }
 
     }
+
+    private func startSelectedMicrophone(_ deviceID: AudioDeviceID, generation: UInt64) throws {
+        guard let uid = AudioRecorder.deviceUID(for: deviceID),
+              let device = AVCaptureDevice(uniqueID: uid), device.hasMediaType(.audio) else {
+            throw AudioRecorderError.engineSetupFailed("Selected microphone is unavailable to native capture")
+        }
+        let session = AVCaptureSession()
+        let input = try AVCaptureDeviceInput(device: device)
+        let output = AVCaptureAudioDataOutput()
+        output.audioSettings = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVLinearPCMIsFloatKey: true,
+            AVLinearPCMBitDepthKey: 32,
+            AVLinearPCMIsNonInterleaved: false
+        ]
+        let delegate = SelectedMicrophoneDelegate(engine: self, generation: generation)
+        output.setSampleBufferDelegate(delegate, queue: callbackQueue)
+        session.beginConfiguration()
+        guard session.canAddInput(input), session.canAddOutput(output) else {
+            session.commitConfiguration()
+            throw AudioRecorderError.engineSetupFailed("Selected microphone cannot be attached to capture session")
+        }
+        session.addInput(input)
+        session.addOutput(output)
+        session.commitConfiguration()
+        session.startRunning()
+        guard session.isRunning else {
+            session.stopRunning()
+            throw AudioRecorderError.engineSetupFailed("Selected microphone capture did not start")
+        }
+        captureDelegate = delegate
+        captureSession = session
+    }
+
+    func handleSampleBuffer(_ sampleBuffer: CMSampleBuffer, generation: UInt64) {
+        guard let description = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let stream = CMAudioFormatDescriptionGetStreamBasicDescription(description),
+              let format = AVAudioFormat(streamDescription: stream),
+              format.commonFormat == .pcmFormatFloat32 else { return }
+        var listSize = 0
+        guard CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer, bufferListSizeNeededOut: &listSize, bufferListOut: nil,
+            bufferListSize: 0, blockBufferAllocator: nil, blockBufferMemoryAllocator: nil,
+            flags: 0, blockBufferOut: nil
+        ) == noErr, listSize > 0 else { return }
+        let storage = UnsafeMutableRawPointer.allocate(byteCount: listSize, alignment: MemoryLayout<AudioBufferList>.alignment)
+        defer { storage.deallocate() }
+        let list = storage.bindMemory(to: AudioBufferList.self, capacity: 1)
+        var blockBuffer: CMBlockBuffer?
+        guard CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer, bufferListSizeNeededOut: nil, bufferListOut: list,
+            bufferListSize: listSize, blockBufferAllocator: nil, blockBufferMemoryAllocator: nil,
+            flags: 0, blockBufferOut: &blockBuffer
+        ) == noErr,
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: list, deallocator: nil) else { return }
+        // Both wrappers borrow CoreMedia's sample storage for this callback only.
+        withExtendedLifetime(blockBuffer) {
+            handleBuffer(buffer, generation: generation)
+        }
+    }
     
-    private func handleBuffer(_ buffer: AVAudioPCMBuffer) {
+    func handleBuffer(_ buffer: AVAudioPCMBuffer, generation: UInt64? = nil) {
         guard let channelData = buffer.floatChannelData else { return }
         let count = Int(buffer.frameLength)
-        guard count > 0 else { return }
-        
-        let newSamples = Array(UnsafeBufferPointer(start: channelData[0], count: count))
-        
-        // Calculate RMS
-        var sum: Float = 0
-        for s in newSamples { sum += s * s }
-        lastRMS = sqrt(sum / Float(count))
-        
-        lock.lock()
-        hasReceivedBuffer = true
-        samples.append(contentsOf: newSamples)
-        lock.unlock()
+        let channels = Int(buffer.format.channelCount)
+        guard count > 0, channels > 0 else { return }
+
+        // Read the callback's borrowed storage directly for mono; only multichannel
+        // input needs a temporary buffer. vDSP also handles interleaved strides.
+        let stride = vDSP_Stride(buffer.stride)
+        func append(_ pointer: UnsafePointer<Float>, stride: vDSP_Stride) {
+            var level: Float = 0
+            vDSP_rmsqv(pointer, stride, &level, vDSP_Length(count))
+            lock.withLock {
+                if let generation, generation != captureGeneration { return }
+                captureSampleRate = buffer.format.sampleRate
+                hasReceivedBuffer = true
+                rms = level
+                if stride == 1 {
+                    samples.append(contentsOf: UnsafeBufferPointer(start: pointer, count: count))
+                } else {
+                    for frame in 0..<count { samples.append(pointer[frame * Int(stride)]) }
+                }
+            }
+        }
+
+        if channels == 1 {
+            append(UnsafePointer(channelData[0]), stride: stride)
+        } else {
+            var mono = [Float](repeating: 0, count: count)
+            mono.withUnsafeMutableBufferPointer { output in
+                guard let destination = output.baseAddress else { return }
+                for channel in 0..<channels {
+                    vDSP_vadd(destination, 1, channelData[channel], stride,
+                              destination, 1, vDSP_Length(count))
+                }
+                var gain = 1 / Float(channels)
+                vDSP_vsmul(destination, 1, &gain, destination, 1, vDSP_Length(count))
+                append(UnsafePointer(destination), stride: 1)
+            }
+        }
     }
     
     func stop() -> [Float] {
-        isCapturing = false
-        
-        if let engine = engine {
-            engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
+        // Finish the recording synchronously. A callback still mixing its
+        // channels will fail the generation check before it can append samples.
+        let result = lock.withLock {
+            captureGeneration &+= 1
+            let result = samples
+            samples = []
+            hasReceivedBuffer = false
+            rms = 0
+            return result
         }
-        engine = nil
-
-        if let previousDefaultInputDeviceID {
-            _ = Self.setDefaultInputDevice(previousDefaultInputDeviceID)
-            self.previousDefaultInputDeviceID = nil
+        // Hardware teardown can block. Keep it on the lifecycle queue, where
+        // it is ordered before any subsequent start without delaying the UI.
+        controlQueue.async { [self] in
+            if let engine {
+                engine.inputNode.removeTap(onBus: 0)
+                engine.stop()
+            }
+            engine = nil
+            captureSession?.stopRunning()
+            captureSession = nil
+            captureDelegate = nil
         }
-        
-        lock.lock()
-        let result = samples
-        samples.removeAll()
-        lock.unlock()
-        
         return result
     }
 
     func waitForFirstBuffer(timeout: Duration) async -> Bool {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
+            guard !Task.isCancelled else { return false }
             if didReceiveBuffer() {
                 return true
             }
-            try? await Task.sleep(for: .milliseconds(25))
+            do {
+                try await Task.sleep(for: .milliseconds(25))
+            } catch {
+                return false
+            }
         }
-        return didReceiveBuffer()
+        return !Task.isCancelled && didReceiveBuffer()
     }
 
     private func didReceiveBuffer() -> Bool {
@@ -224,59 +377,6 @@ final class AudioCaptureEngine: @unchecked Sendable {
         return result
     }
 
-    private static func defaultInputDeviceID() -> AudioDeviceID? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        var deviceID = AudioDeviceID(0)
-        var dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
-        let status = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            0,
-            nil,
-            &dataSize,
-            &deviceID
-        )
-        guard status == noErr else { return nil }
-        return deviceID
-    }
-
-    private static func setDefaultInputDevice(_ deviceID: AudioDeviceID) -> Bool {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var mutableDeviceID = deviceID
-        let dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
-        let status = AudioObjectSetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            0,
-            nil,
-            dataSize,
-            &mutableDeviceID
-        )
-        return status == noErr
-    }
-
-    private static func waitForDefaultInputDevice(
-        _ expectedDeviceID: AudioDeviceID,
-        timeout: TimeInterval
-    ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if defaultInputDeviceID() == expectedDeviceID {
-                return true
-            }
-            usleep(50_000)
-        }
-        return defaultInputDeviceID() == expectedDeviceID
-    }
 }
 
 @MainActor
@@ -285,6 +385,8 @@ public class AudioRecorder: ObservableObject {
 
     private let captureEngine = AudioCaptureEngine()
     private var levelTimer: Timer?
+    private var isStarting = false
+    private var startupGeneration: UInt64 = 0
     
     @Published public var isRecording = false
     @Published public var audioLevel: Float = 0.0
@@ -314,9 +416,18 @@ public class AudioRecorder: ObservableObject {
     }
     
     public func startRecording() async throws {
+        try Task.checkCancellation()
         guard !isRecording else { return }
+        guard !isStarting else {
+            throw AudioRecorderError.engineSetupFailed("Microphone startup is still in progress")
+        }
+        isStarting = true
+        startupGeneration &+= 1
+        let generation = startupGeneration
+        defer { isStarting = false }
         
         let hasPermission = await requestPermission()
+        try checkStartup(generation)
         guard hasPermission else {
             throw AudioRecorderError.permissionDenied
         }
@@ -324,7 +435,13 @@ public class AudioRecorder: ObservableObject {
         logger.info("Starting recording...")
 
         refreshInputDevices()
-        try await startCaptureWithFallback()
+        do {
+            try await startCaptureWithFallback(generation: generation)
+            try checkStartup(generation)
+        } catch {
+            _ = captureEngine.stop()
+            throw error
+        }
         isRecording = true
         
         // Poll audio level on main thread
@@ -340,7 +457,12 @@ public class AudioRecorder: ObservableObject {
         logger.info("Recording started")
     }
 
-    private func startCaptureWithFallback() async throws {
+    private func checkStartup(_ generation: UInt64) throws {
+        try Task.checkCancellation()
+        guard generation == startupGeneration else { throw CancellationError() }
+    }
+
+    private func startCaptureWithFallback(generation: UInt64) async throws {
         let candidates = AudioInputRoutePlanner.orderedCandidates(
             selectedUID: selectedInputDeviceUID,
             systemDefaultUID: Self.defaultInputDeviceID().flatMap { Self.deviceUID(for: $0) },
@@ -349,10 +471,13 @@ public class AudioRecorder: ObservableObject {
 
         var lastError: Error?
         for candidate in candidates {
+            try checkStartup(generation)
             do {
-                try await attemptCaptureStart(using: candidate)
+                try await attemptCaptureStart(using: candidate, generation: generation)
                 logger.info("Microphone candidate \(self.logDescription(for: candidate), privacy: .public) selected")
                 return
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 lastError = error
                 logger.warning(
@@ -364,13 +489,19 @@ public class AudioRecorder: ObservableObject {
         throw lastError ?? AudioRecorderError.engineSetupFailed("No working microphone input found")
     }
 
-    private func attemptCaptureStart(using candidate: AudioInputRouteCandidate) async throws {
+    private func attemptCaptureStart(using candidate: AudioInputRouteCandidate, generation: UInt64) async throws {
         let preferredDeviceID = try preferredDeviceID(for: candidate)
-        try captureEngine.start(preferredDeviceID: preferredDeviceID)
-
-        guard await captureEngine.waitForFirstBuffer(timeout: .milliseconds(700)) else {
+        do {
+            try await captureEngine.start(preferredDeviceID: preferredDeviceID)
+            try checkStartup(generation)
+            let received = await captureEngine.waitForFirstBuffer(timeout: .milliseconds(700))
+            try checkStartup(generation)
+            guard received else {
+                throw AudioRecorderError.engineSetupFailed("Microphone produced no audio buffers")
+            }
+        } catch {
             _ = captureEngine.stop()
-            throw AudioRecorderError.engineSetupFailed("Microphone produced no audio buffers")
+            throw error
         }
     }
 
@@ -397,6 +528,21 @@ public class AudioRecorder: ObservableObject {
     }
     
     public func stopRecording() -> [Float] {
+        let capture = finishCapture()
+        return Self.resample(capture.samples, from: capture.rate, to: targetSampleRate)
+    }
+
+    /// Stops capture immediately; CPU resampling then runs away from the UI actor.
+    public func stopRecordingAndResample() async -> [Float] {
+        let capture = finishCapture()
+        let targetRate = targetSampleRate
+        return await Task.detached(priority: .userInitiated) {
+            Self.resample(capture.samples, from: capture.rate, to: targetRate)
+        }.value
+    }
+
+    private func finishCapture() -> (samples: [Float], rate: Double) {
+        startupGeneration &+= 1
         logger.info("Stopping recording...")
         
         levelTimer?.invalidate()
@@ -410,10 +556,11 @@ public class AudioRecorder: ObservableObject {
         
         logger.info("Stopped with \(samples.count) samples at \(sourceRate)Hz")
         
-        return resample(samples, from: sourceRate, to: targetSampleRate)
+        return (samples, sourceRate)
     }
     
-    private func resample(_ inputSamples: [Float], from sourceRate: Double, to destinationRate: Double) -> [Float] {
+    nonisolated static func resample(_ inputSamples: [Float], from sourceRate: Double, to destinationRate: Double) -> [Float] {
+        guard !inputSamples.isEmpty else { return [] }
         guard sourceRate > 0 && sourceRate != destinationRate else {
             return inputSamples
         }
@@ -595,12 +742,18 @@ public class AudioRecorder: ObservableObject {
     nonisolated static func bridgePermissionRequest(
         _ request: @escaping @Sendable (@escaping @Sendable (Bool) -> Void) -> Void
     ) async -> Bool {
-        await withCheckedContinuation { continuation in
-            request { granted in
-                Task { @MainActor in
-                    continuation.resume(returning: granted)
+        let state = MicrophonePermissionRequest()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                state.install(continuation)
+                if Task.isCancelled {
+                    state.resolve(false)
+                } else {
+                    request { granted in state.resolve(granted) }
                 }
             }
+        } onCancel: {
+            state.resolve(false)
         }
     }
 
@@ -610,7 +763,7 @@ public class AudioRecorder: ObservableObject {
         AVCaptureDevice.requestAccess(for: .audio, completionHandler: completion)
     }
 
-    nonisolated private static func deviceUID(for deviceID: AudioDeviceID) -> String? {
+    nonisolated fileprivate static func deviceUID(for deviceID: AudioDeviceID) -> String? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyDeviceUID,
             mScope: kAudioObjectPropertyScopeGlobal,

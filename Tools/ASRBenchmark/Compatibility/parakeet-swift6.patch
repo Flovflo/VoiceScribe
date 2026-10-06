@@ -1,0 +1,46 @@
+--- a/Sources/MLXAudioSTT/Models/Parakeet/ParakeetModel.swift
++++ b/Sources/MLXAudioSTT/Models/Parakeet/ParakeetModel.swift
+@@ -322,8 +322,9 @@
+             return compiled
+         }
+ 
+-        let compiled: @Sendable (MLXArray) -> MLXArray = compile { [self] features in
+-            self.encoder(features).0
++        nonisolated(unsafe) let encoderModel = self
++        let compiled: @Sendable (MLXArray) -> MLXArray = compile { features in
++            encoderModel.encoder(features).0
+         }
+         compiledEncoderFeaturesByShape[key] = compiled
+         return compiled
+@@ -902,7 +903,9 @@
+         }
+     }
+ 
+-    let blankTokenArray = MLXArray(Int32(blankTokenId)).reshaped([1, 1])
++    nonisolated(unsafe) let capturedDecoder = decoder
++    nonisolated(unsafe) let capturedJoint = joint
++    nonisolated(unsafe) let blankTokenArray = MLXArray(Int32(blankTokenId)).reshaped([1, 1])
+ 
+     return compile { arrays in
+         let feature = arrays[0]
+@@ -910,17 +913,17 @@
+         let hidden = arrays[2]
+         let cell = arrays[3]
+ 
+-        let embedded = decoder.prediction.embed(currentToken)
++        let embedded = capturedDecoder.prediction.embed(currentToken)
+         let blankMask = (currentToken .== blankTokenArray).expandedDimensions(axis: 2)
+         let zeroEmbedded = MLXArray.zeros(like: embedded)
+         let maskedEmbedded = MLX.where(blankMask, zeroEmbedded, embedded)
+ 
+-        let decoderOut = decoder.prediction.decRnn(maskedEmbedded, state: (hidden: hidden, cell: cell))
++        let decoderOut = capturedDecoder.prediction.decRnn(maskedEmbedded, state: (hidden: hidden, cell: cell))
+         let pred = decoderOut.0.asType(feature.dtype)
+         let hiddenOut = decoderOut.1.hidden!.asType(feature.dtype)
+         let cellOut = decoderOut.1.cell!.asType(feature.dtype)
+ 
+-        let jointOut = joint(feature, pred)
++        let jointOut = capturedJoint(feature, pred)
+         let tokenLogits = jointOut[0, 0, 0, ..<(blankTokenId + 1)]
+         let durationLogits = jointOut[0, 0, 0, (blankTokenId + 1)...]
+         let predToken = tokenLogits.argMax(axis: -1).asType(.int32)

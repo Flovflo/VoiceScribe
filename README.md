@@ -51,6 +51,8 @@ Once onboarding is complete, the app stays intentionally simple:
 - One hotkey, one floating HUD, one fast dictation loop
 - Automatic clipboard copy and paste injection
 - Strong English and French dictation
+- Native Liquid Glass on macOS 26+, with system materials on macOS 14/15
+- Microphone selection scoped to VoiceScribe, without changing macOS's default input
 
 ## Why Native MLX
 
@@ -80,7 +82,11 @@ VoiceScribe supports `mlx-community/Qwen3-ASR` variants only.
 
 Default model:
 
-- `mlx-community/Qwen3-ASR-1.7B-8bit`
+- `mlx-community/Qwen3-ASR-1.7B-4bit` (about 1.60 GB of weights)
+
+Existing saved model choices are preserved. The 8-bit variant remains available in advanced settings (about 2.46 GB of weights). Runtime memory also includes activations and decoding buffers.
+
+Voxtral Mini 4B Realtime 2602, Qwen3-ASR 1.7B 4-bit, and Parakeet TDT 0.6B v3 are evaluated separately using native Swift/MLX in [the reproducible benchmark tool](Tools/ASRBenchmark/README.md). These comparisons do not add another runtime backend to the app. See the [local results](Tools/ASRBenchmark/Results/REPORT.md) and [FR/EN research audit](docs/AUDIT_MACOS_ASR_2026-10-04.md) for measurements, sources, and corpus limitations.
 
 ## Install
 
@@ -105,6 +111,8 @@ swift build -c release --arch arm64
 open VoiceScribe.app
 ```
 
+Xcode's Metal Toolchain is required to compile MLX shaders. If Xcode reports that it is missing, install the component with `xcodebuild -downloadComponent MetalToolchain` and rebuild. The packaging script ships the Metal library produced by the same SwiftPM build.
+
 ## Validation
 
 Fast suite:
@@ -124,6 +132,17 @@ Optional real ASR validation:
 ```bash
 VOICESCRIBE_RUN_ASR_TESTS=1 swift test --filter NativeEngineTests
 ```
+
+To validate a known French or English speech fixture, provide a mono 16 kHz WAV and expected keywords:
+
+```bash
+VOICESCRIBE_RUN_ASR_TESTS=1 \
+VOICESCRIBE_TEST_AUDIO=Tools/ASRBenchmark/Fixtures/fr.wav \
+VOICESCRIBE_EXPECT_KEYWORDS=bonjour,transcription,français \
+swift test --filter NativeEngineTests.testTranscriptionWithSampleAudio
+```
+
+`VOICESCRIBE_TEST_MODEL` and `VOICESCRIBE_TEST_MODEL_DIRECTORY` optionally select an existing local model snapshot. Hardware capture tests use `VOICESCRIBE_RUN_CAPTURE_TESTS=1` after microphone permission is already granted.
 
 ## Docs
 

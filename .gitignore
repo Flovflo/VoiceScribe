@@ -16,19 +16,18 @@ DerivedData/
 
 # Swift Package Manager
 .swiftpm/
-Package.resolved
 
 # macOS
 .DS_Store
 *.app
 
-# Python
-venv/
-__pycache__/
-*.pyc
-*.pyo
-.Python
-*.egg-info/
+# Local signing credentials must never be committed or uploaded as release assets.
+*.p8
+*.p12
+*.pfx
+*.key
+*.pem
+/signing/
 
 # IDE
 .vscode/
