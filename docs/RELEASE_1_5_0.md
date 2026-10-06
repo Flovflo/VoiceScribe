@@ -6,10 +6,18 @@ Release for Apple Silicon, macOS 14 or later. Native Liquid Glass requires macOS
 
 - 88 core tests and 3 HUD tests: zero failures, 8 optional skips. Explicit native FR/EN inference and microphone capture checks are documented in the [macOS audit](AUDIT_MACOS_ASR_2026-10-04.md).
 - Developer ID Application: FLORIAN DAMIEN TAFFIN, team `WZ4CHJH7TA`; secure timestamp, hardened runtime and microphone entitlement. No JIT, unsigned executable memory or disabled library validation entitlement.
-- App notarization accepted: `9113c26e-d968-4ac8-98c0-40a84bafeed1`.
-- DMG notarization accepted: `cfc71f4d-5eb3-426c-9264-8c0ed27f0348`.
+- App notarization accepted: `35908ec5-f5b4-412c-9d3e-73bf814d24b9`.
+- DMG notarization accepted: `1520457f-c976-49d7-b4aa-bcce9685897a`.
 - App and DMG tickets stapled and validated; Gatekeeper reports `Notarized Developer ID` for both. ZIP contains the stapled app.
 - The GitHub assets contain the app and checksum files only. Model weights download on first use. No signing private key, certificate export, API credential or local user preference is shipped.
+- The final binary includes the explicit permission-result member lookup required by Swift 6.3. Core/HUD tests and the arm64 release build were rerun before signing and notarization.
+
+Final SHA-256 checksums, generated after stapling:
+
+| Asset | SHA-256 |
+| --- | --- |
+| `VoiceScribe-1.5.0-arm64.dmg` | `f1da3014513f6663c689eff8c67176b4a33c9e09c68835739cdd683948009d0e` |
+| `VoiceScribe-1.5.0-arm64.zip` | `d2e70a8e8a94de1391110e0662f42a42f8d38c9ed6180bf2cfcc4e610b403486` |
 
 ## Security review and remediation
 
