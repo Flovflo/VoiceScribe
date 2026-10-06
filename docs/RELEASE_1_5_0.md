@@ -19,6 +19,8 @@ CI now produces explicitly unsigned preview artifacts and cannot publish public 
 
 Secret scanning and push protection are enabled. Dependabot alerts and automated security updates were enabled during this release. Initial API readbacks returned no open secret/dependency alerts; that does not establish an exhaustive fresh dependency scan.
 
+GitHub release immutability is enabled: publication locks this release's tag and assets and generates a release attestation. `main` is protected against force pushes and deletion, including administrator pushes. These controls do not claim that every account, dependency or branch change has been independently reviewed.
+
 Review limitations: binary artwork/audio, raw benchmark-result JSON, Git history and exhaustive third-party parser/dependency review were not completed. Production model revisions are still mutable; optional ambient Hugging Face endpoint/token and shared-cache behavior are inherited from the dependency. Clipboard contents remain visible to software with the user's desktop authority. No claim of complete security certification is made.
 
 ## Rebuilding a signed app
